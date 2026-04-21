@@ -181,5 +181,7 @@ def _friendly_error_message(error: Exception) -> str:
 if __name__ == "__main__":
     if not os.getenv("OPENAI_API_KEY"):
         print("⚠️  WARNING: OPENAI_API_KEY not found in .env")
-    print("🚀  DT's CV Generator → http://localhost:5050")
-    app.run(debug=False, host="127.0.0.1", port=5050, threaded=True)
+    port = int(os.getenv("PORT", "5050"))
+    host = "0.0.0.0" if os.getenv("PORT") else "127.0.0.1"
+    print(f"🚀  DT's CV Generator → http://{host}:{port}")
+    app.run(debug=False, host=host, port=port, threaded=True)
