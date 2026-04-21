@@ -6,7 +6,6 @@ from string import Template
 
 from pdf_fallback import build_cover_letter_pdf_bytes
 from generator import (
-    CHROME_PATH,
     PROFILE,
     PROJECT_DIR,
     ROLE_CONFIGS,
@@ -19,6 +18,7 @@ from generator import (
     sanitize_filename_part,
     slugify,
     chrome_available,
+    resolve_chrome_path,
 )
 
 
@@ -348,6 +348,9 @@ def generate_cover_letter_for_config(config: dict, content: dict, options: dict 
 
 
 if __name__ == "__main__":
-    if not CHROME_PATH.exists():
-        print(f"Chrome not found at {CHROME_PATH}; using PDF fallback when available.")
+    chrome_path = resolve_chrome_path()
+    if chrome_path is None:
+        print("Chrome not found; using PDF fallback when available.")
+    else:
+        print(f"Using Chrome at {chrome_path}")
     render_cover_letters()

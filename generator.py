@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import html
+import os
 import re
 import subprocess
 import tempfile
@@ -10,9 +11,17 @@ from string import Template
 
 from pdf_fallback import build_cv_pdf_bytes
 
-CHROME_PATH = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 PROJECT_DIR = Path(__file__).resolve().parent
 RUNTIME_OUTPUT_DIR = Path(tempfile.gettempdir()) / "dt_cv_generator"
+
+CHROME_CANDIDATES = [
+    os.getenv("CHROME_PATH"),
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+]
 
 PROFILE = {
     "first_name": "Du-Toit",
@@ -683,6 +692,16 @@ def get_runtime_output_dir() -> Path:
     return RUNTIME_OUTPUT_DIR
 
 
+def resolve_chrome_path() -> Path | None:
+    for candidate in CHROME_CANDIDATES:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if path.exists():
+            return path
+    return None
+
+
 def build_context(config: dict, image_uri: str, options: dict | None = None) -> dict:
     resolved = normalize_render_options(options)
     summary = config["summary"].strip()
@@ -712,12 +731,16 @@ def render_html(template_text: str, context: dict) -> str:
 
 
 def chrome_available() -> bool:
-    return CHROME_PATH.exists()
+    return resolve_chrome_path() is not None
 
 
 def _run_chrome_pdf(temp_html_path: Path, output_pdf_path: Path) -> None:
+    chrome_path = resolve_chrome_path()
+    if chrome_path is None:
+        raise RuntimeError("Chrome PDF rendering is unavailable.")
+
     command = [
-        str(CHROME_PATH),
+        str(chrome_path),
         "--headless",
         "--no-sandbox",
         "--disable-gpu",
@@ -794,6 +817,9 @@ def generate_cv_for_config(config: dict, options: dict | None = None) -> Path:
 
 
 if __name__ == "__main__":
-    if not CHROME_PATH.exists():
-        print(f"Chrome not found at {CHROME_PATH}; using PDF fallback when available.")
+    chrome_path = resolve_chrome_path()
+    if chrome_path is None:
+        print("Chrome not found; using PDF fallback when available.")
+    else:
+        print(f"Using Chrome at {chrome_path}")
     render_cvs()
