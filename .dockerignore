@@ -16,3 +16,4 @@ _build_*.html
 Job Specs.docx
 *.docx
 *.txt
+!requirements.txt
