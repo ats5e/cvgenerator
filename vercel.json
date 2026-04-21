@@ -1,9 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "app.py": {
-      "maxDuration": 60,
-      "excludeFiles": "{*.pdf,_build_*.html,Job Specs.docx,*.docx,*.txt}"
-    }
-  }
-}
