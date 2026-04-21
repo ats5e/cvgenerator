@@ -10,7 +10,11 @@ from generator import (
     PROFILE,
     PROJECT_DIR,
     ROLE_CONFIGS,
+    build_contact_line,
+    build_header_image_html,
+    build_render_variant_filename_suffix,
     escape,
+    normalize_render_options,
     sanitize_filename_part,
     slugify,
 )
@@ -140,10 +144,12 @@ COVER_LETTER_CONTENT = {
 }
 
 
-def build_cover_letter_filename(config: dict) -> str:
+def build_cover_letter_filename(config: dict, options: dict | None = None) -> str:
     company = sanitize_filename_part(config["company_name"])
     role = sanitize_filename_part(config["target_role"])
-    return f"{company} - Du-Toit Griesel - {role} - Cover Letter.pdf"
+    variant_suffix = build_render_variant_filename_suffix(options)
+    variant_part = f" - {variant_suffix}" if variant_suffix else ""
+    return f"{company} - Du-Toit Griesel - {role}{variant_part} - Cover Letter.pdf"
 
 
 def build_letter_date() -> str:
@@ -163,6 +169,13 @@ def render_meta(items: list[dict[str, str]]) -> str:
     return "\n".join(blocks)
 
 
+def render_meta_section(items: list[dict[str, str]], options: dict | None = None) -> str:
+    resolved = normalize_render_options(options)
+    if not resolved["show_highlight_strip"]:
+        return ""
+    return "<div class=\"meta-row\">\n" + render_meta(items) + "\n</div>"
+
+
 def render_letter_body(paragraphs: list[str]) -> str:
     rendered = []
     for index, paragraph in enumerate(paragraphs):
@@ -177,7 +190,18 @@ def render_letter_body(paragraphs: list[str]) -> str:
     return "\n".join(rendered)
 
 
-def build_cover_letter_context(config: dict, image_uri: str) -> dict:
+def get_cover_letter_template_path(options: dict | None = None) -> Path:
+    resolved = normalize_render_options(options)
+    template_name = (
+        "cover_letter_template_plain.html"
+        if resolved["design_style"] == "plain"
+        else "cover_letter_template.html"
+    )
+    return PROJECT_DIR / template_name
+
+
+def build_cover_letter_context(config: dict, image_uri: str, options: dict | None = None) -> dict:
+    resolved = normalize_render_options(options)
     content = COVER_LETTER_CONTENT[config["company_name"]]
     meta_items = [
         {"label": "Target Company", "value": config["company_name"]},
@@ -191,10 +215,8 @@ def build_cover_letter_context(config: dict, image_uri: str) -> dict:
         "first_name": escape(PROFILE["first_name"]),
         "last_name": escape(PROFILE["last_name"]),
         "tagline": escape(config["tagline"]),
-        "contact_line": escape(
-            f"{PROFILE['location']} | {PROFILE['phone']} | {PROFILE['email']} | {PROFILE['linkedin']}"
-        ),
-        "meta_html": render_meta(meta_items),
+        "contact_line": escape(build_contact_line(resolved)),
+        "meta_section_html": render_meta_section(meta_items, resolved),
         "letter_date": escape(build_letter_date()),
         "letter_recipient": escape(content["recipient"]),
         "letter_body_html": render_letter_body(content["paragraphs"]),
@@ -202,7 +224,7 @@ def build_cover_letter_context(config: dict, image_uri: str) -> dict:
         "signature_name": escape(f"{PROFILE['first_name']} {PROFILE['last_name']}"),
         "footer_title": escape(footer_title),
         "footer_subtitle": escape(PROFILE["footer_subtitle"]),
-        "img_path": escape(image_uri),
+        "header_image_html": build_header_image_html(image_uri, resolved),
     }
 
 
@@ -246,24 +268,26 @@ def render_cover_letters() -> None:
     if missing:
         raise ValueError(f"Missing cover letter content for: {', '.join(missing)}")
 
-    template_text = (PROJECT_DIR / "cover_letter_template.html").read_text(encoding="utf-8")
+    options = normalize_render_options()
+    template_text = get_cover_letter_template_path(options).read_text(encoding="utf-8")
     image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
 
     for config in ROLE_CONFIGS:
-        context = build_cover_letter_context(config, image_uri)
+        context = build_cover_letter_context(config, image_uri, options)
         html_output = render_html(template_text, context)
         temp_name = f"_build_cover_letter_{slugify(config['filename_suffix'])}.html"
-        output_pdf_path = PROJECT_DIR / build_cover_letter_filename(config)
+        output_pdf_path = PROJECT_DIR / build_cover_letter_filename(config, options)
         render_pdf(html_output, temp_name, output_pdf_path)
 
 
-def generate_cover_letter_for_config(config: dict, content: dict) -> Path:
+def generate_cover_letter_for_config(config: dict, content: dict, options: dict | None = None) -> Path:
     """
     Generate a cover letter PDF for a single config + content dict.
     content must have keys: recipient (str), focus (str), paragraphs (list[str]).
     Returns the output PDF Path.
     """
-    template_text = (PROJECT_DIR / "cover_letter_template.html").read_text(encoding="utf-8")
+    resolved = normalize_render_options(options)
+    template_text = get_cover_letter_template_path(resolved).read_text(encoding="utf-8")
     image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
 
     meta_items = [
@@ -278,10 +302,8 @@ def generate_cover_letter_for_config(config: dict, content: dict) -> Path:
         "first_name": escape(PROFILE["first_name"]),
         "last_name": escape(PROFILE["last_name"]),
         "tagline": escape(config["tagline"]),
-        "contact_line": escape(
-            f"{PROFILE['location']} | {PROFILE['phone']} | {PROFILE['email']} | {PROFILE['linkedin']}"
-        ),
-        "meta_html": render_meta(meta_items),
+        "contact_line": escape(build_contact_line(resolved)),
+        "meta_section_html": render_meta_section(meta_items, resolved),
         "letter_date": escape(build_letter_date()),
         "letter_recipient": escape(content.get("recipient", "Dear Hiring Team,")),
         "letter_body_html": render_letter_body(content.get("paragraphs", [])),
@@ -289,12 +311,12 @@ def generate_cover_letter_for_config(config: dict, content: dict) -> Path:
         "signature_name": escape(f"{PROFILE['first_name']} {PROFILE['last_name']}"),
         "footer_title": escape(footer_title),
         "footer_subtitle": escape(PROFILE["footer_subtitle"]),
-        "img_path": escape(image_uri),
+        "header_image_html": build_header_image_html(image_uri, resolved),
     }
 
     html_output = render_html(template_text, context)
     temp_name = f"_build_cover_letter_{slugify(config['filename_suffix'])}.html"
-    output_pdf_path = PROJECT_DIR / build_cover_letter_filename(config)
+    output_pdf_path = PROJECT_DIR / build_cover_letter_filename(config, resolved)
     render_pdf(html_output, temp_name, output_pdf_path)
 
     return output_pdf_path

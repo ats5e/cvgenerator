@@ -21,6 +21,13 @@ PROFILE = {
     "footer_subtitle": "South African | English, Afrikaans | References available on request",
 }
 
+DEFAULT_RENDER_OPTIONS = {
+    "design_style": "signature",
+    "include_photo": True,
+    "contact_mode": "full",
+    "show_highlight_strip": True,
+}
+
 COMMON_STATS = [
     {"number": "8+", "label": "years agency experience"},
     {"number": "2", "label": "markets: UAE and South Africa"},
@@ -506,10 +513,91 @@ def sanitize_filename_part(value: str) -> str:
     return value.strip()
 
 
-def build_output_filename(config: dict) -> str:
+def coerce_bool(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
+def normalize_render_options(options: dict | None = None) -> dict:
+    merged = dict(DEFAULT_RENDER_OPTIONS)
+    if not options:
+        return merged
+
+    design_style = str(options.get("design_style") or merged["design_style"]).strip().lower()
+    if design_style in {"signature", "plain"}:
+        merged["design_style"] = design_style
+
+    contact_mode = str(options.get("contact_mode") or merged["contact_mode"]).strip().lower()
+    if contact_mode in {"full", "minimal"}:
+        merged["contact_mode"] = contact_mode
+
+    merged["include_photo"] = coerce_bool(options.get("include_photo"), merged["include_photo"])
+    merged["show_highlight_strip"] = coerce_bool(
+        options.get("show_highlight_strip"),
+        merged["show_highlight_strip"],
+    )
+    return merged
+
+
+def build_render_variant_label(options: dict | None = None) -> str:
+    resolved = normalize_render_options(options)
+    labels = [
+        "Plain" if resolved["design_style"] == "plain" else "Signature",
+        "Photo On" if resolved["include_photo"] else "Photo Off",
+        "Full Header" if resolved["contact_mode"] == "full" else "Lean Header",
+        "Highlights On" if resolved["show_highlight_strip"] else "Highlights Off",
+    ]
+    return " | ".join(labels)
+
+
+def build_render_variant_filename_suffix(options: dict | None = None) -> str:
+    resolved = normalize_render_options(options)
+    parts = []
+    if resolved["design_style"] == "plain":
+        parts.append("Plain")
+    if not resolved["include_photo"]:
+        parts.append("No Photo")
+    if resolved["contact_mode"] == "minimal":
+        parts.append("Lean Header")
+    if not resolved["show_highlight_strip"]:
+        parts.append("No Highlights")
+    return " - ".join(parts)
+
+
+def build_output_filename(config: dict, options: dict | None = None) -> str:
     company = sanitize_filename_part(config["company_name"])
     role = sanitize_filename_part(config["target_role"])
-    return f"{company} - Du-Toit Griesel - {role} - CV.pdf"
+    variant_suffix = build_render_variant_filename_suffix(options)
+    variant_part = f" - {variant_suffix}" if variant_suffix else ""
+    return f"{company} - Du-Toit Griesel - {role}{variant_part} - CV.pdf"
+
+
+def build_contact_line(options: dict | None = None) -> str:
+    resolved = normalize_render_options(options)
+    if resolved["contact_mode"] == "minimal":
+        items = [PROFILE["phone"], PROFILE["email"], PROFILE["linkedin"]]
+    else:
+        items = [PROFILE["location"], PROFILE["phone"], PROFILE["email"], PROFILE["linkedin"]]
+    return " | ".join(items)
+
+
+def build_header_image_html(image_uri: str, options: dict | None = None) -> str:
+    resolved = normalize_render_options(options)
+    if not resolved["include_photo"]:
+        return ""
+    return (
+        f"<img class=\"header-image\" src=\"{escape(image_uri)}\" "
+        f"alt=\"{escape(PROFILE['first_name'])} {escape(PROFILE['last_name'])} headshot\">"
+    )
 
 
 def build_experience(config: dict) -> list[dict]:
@@ -529,6 +617,13 @@ def render_stats(stats: list[dict]) -> str:
             "</div>"
         )
     return "\n".join(items)
+
+
+def render_stats_section(stats: list[dict], options: dict | None = None) -> str:
+    resolved = normalize_render_options(options)
+    if not resolved["show_highlight_strip"]:
+        return ""
+    return "<div class=\"stats-row\">\n" + render_stats(stats) + "\n</div>"
 
 
 def render_skills(skills: list[str]) -> str:
@@ -574,7 +669,14 @@ def render_education(education: list[dict]) -> str:
     return "\n".join(items)
 
 
-def build_context(config: dict, image_uri: str) -> dict:
+def get_cv_template_path(options: dict | None = None) -> Path:
+    resolved = normalize_render_options(options)
+    template_name = "template_plain.html" if resolved["design_style"] == "plain" else "template.html"
+    return PROJECT_DIR / template_name
+
+
+def build_context(config: dict, image_uri: str, options: dict | None = None) -> dict:
+    resolved = normalize_render_options(options)
     summary = config["summary"].strip()
     return {
         "pdf_title": escape(f"Du-Toit Griesel - {config['pdf_title']} - CV"),
@@ -582,18 +684,16 @@ def build_context(config: dict, image_uri: str) -> dict:
         "first_name": escape(PROFILE["first_name"]),
         "last_name": escape(PROFILE["last_name"]),
         "tagline": escape(config["tagline"]),
-        "contact_line": escape(
-            f"{PROFILE['location']} | {PROFILE['phone']} | {PROFILE['email']} | {PROFILE['linkedin']}"
-        ),
+        "contact_line": escape(build_contact_line(resolved)),
         "summary_initial": escape(summary[0]),
         "summary_rest": escape(summary[1:]),
-        "stats_html": render_stats(config.get("stats", COMMON_STATS)),
+        "stats_section_html": render_stats_section(config.get("stats", COMMON_STATS), resolved),
         "skills_html": render_skills(config["skills"]),
         "experience_html": render_experience(build_experience(config)),
         "education_html": render_education(BASE_EDUCATION),
         "footer_title": escape(config["target_role"]),
         "footer_subtitle": escape(PROFILE["footer_subtitle"]),
-        "img_path": escape(image_uri),
+        "header_image_html": build_header_image_html(image_uri, resolved),
     }
 
 
@@ -602,14 +702,15 @@ def render_html(template_text: str, context: dict) -> str:
 
 
 def render_cvs() -> None:
-    template_text = (PROJECT_DIR / "template.html").read_text(encoding="utf-8")
+    options = normalize_render_options()
+    template_text = get_cv_template_path(options).read_text(encoding="utf-8")
     image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
 
     for config in ROLE_CONFIGS:
-        context = build_context(config, image_uri)
+        context = build_context(config, image_uri, options)
         html_output = render_html(template_text, context)
         temp_html_path = PROJECT_DIR / f"_build_{slugify(config['filename_suffix'])}.html"
-        output_pdf_path = PROJECT_DIR / build_output_filename(config)
+        output_pdf_path = PROJECT_DIR / build_output_filename(config, options)
 
         temp_html_path.write_text(html_output, encoding="utf-8")
         print(f"Generating {output_pdf_path.name}...", end=" ")
@@ -636,16 +737,17 @@ def render_cvs() -> None:
             temp_html_path.unlink(missing_ok=True)
 
 
-def generate_cv_for_config(config: dict) -> Path:
+def generate_cv_for_config(config: dict, options: dict | None = None) -> Path:
     """Generate a CV PDF for a single config dict. Returns the output PDF Path."""
-    template_text = (PROJECT_DIR / "template.html").read_text(encoding="utf-8")
+    resolved = normalize_render_options(options)
+    template_text = get_cv_template_path(resolved).read_text(encoding="utf-8")
     image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
 
-    context = build_context(config, image_uri)
+    context = build_context(config, image_uri, resolved)
     html_output = render_html(template_text, context)
 
     temp_html_path = PROJECT_DIR / f"_build_{slugify(config['filename_suffix'])}.html"
-    output_pdf_path = PROJECT_DIR / build_output_filename(config)
+    output_pdf_path = PROJECT_DIR / build_output_filename(config, resolved)
 
     temp_html_path.write_text(html_output, encoding="utf-8")
 

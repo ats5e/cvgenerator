@@ -21,9 +21,15 @@ sys.path.insert(0, str(PROJECT_DIR))
 
 import ai_engine  # noqa: E402 — must be after sys.path update
 from cover_letter_generator import generate_cover_letter_for_config  # noqa: E402
-from generator import generate_cv_for_config  # noqa: E402
+from generator import (  # noqa: E402
+    PROFILE,
+    build_render_variant_label,
+    generate_cv_for_config,
+    normalize_render_options,
+)
 
 app = Flask(__name__, template_folder=str(PROJECT_DIR / "templates"))
+app.config["PROPAGATE_EXCEPTIONS"] = False
 
 
 # ---------------------------------------------------------------------------
@@ -32,13 +38,27 @@ app = Flask(__name__, template_folder=str(PROJECT_DIR / "templates"))
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", profile=PROFILE)
+
+
+@app.route("/profile-image")
+def profile_image():
+    return send_file(PROJECT_DIR / "cropped_circle_image.png", mimetype="image/png")
 
 
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.get_json(force=True) or {}
     job_description = (data.get("job_description") or "").strip()
+    recipient_override = (data.get("recipient") or "").strip()
+    company_override = (data.get("company_name") or "").strip()
+    role_override = (data.get("role_title") or "").strip()
+    render_options = normalize_render_options({
+        "design_style": data.get("design_style"),
+        "include_photo": data.get("include_photo"),
+        "contact_mode": data.get("contact_mode"),
+        "show_highlight_strip": data.get("show_highlight_strip"),
+    })
 
     if not job_description:
         return jsonify({"error": "No job description provided."}), 400
@@ -50,21 +70,32 @@ def generate():
 
             cv_config, cl_content, keywords = ai_engine.generate_config(job_description)
 
+            if company_override:
+                cv_config["company_name"] = company_override
+            if role_override:
+                cv_config["target_role"] = role_override
+                cv_config["role_badge"] = role_override.upper()
+            if recipient_override:
+                cl_content["recipient"] = recipient_override
+
             yield _sse({
                 "status": "keywords",
                 "message": f"Extracted {len(keywords)} ATS keywords",
                 "keywords": keywords,
                 "company": cv_config["company_name"],
                 "role": cv_config["target_role"],
+                "recipient": cl_content.get("recipient", "Dear Hiring Team,"),
+                "render_options": render_options,
+                "variant_label": build_render_variant_label(render_options),
             })
 
             # Step 2 — CV PDF
             yield _sse({"status": "cv", "message": "Generating tailored CV PDF…"})
-            cv_path = generate_cv_for_config(cv_config)
+            cv_path = generate_cv_for_config(cv_config, render_options)
 
             # Step 3 — Cover letter PDF
             yield _sse({"status": "letter", "message": "Generating tailored cover letter PDF…"})
-            letter_path = generate_cover_letter_for_config(cv_config, cl_content)
+            letter_path = generate_cover_letter_for_config(cv_config, cl_content, render_options)
 
             # Step 4 — Done
             yield _sse({
@@ -74,12 +105,19 @@ def generate():
                 "letter_url": f"/download/{letter_path.name}",
                 "company": cv_config["company_name"],
                 "role": cv_config["target_role"],
+                "recipient": cl_content.get("recipient", "Dear Hiring Team,"),
                 "keywords": keywords,
+                "render_options": render_options,
+                "variant_label": build_render_variant_label(render_options),
             })
 
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             import traceback
-            yield _sse({"status": "error", "message": str(exc), "detail": traceback.format_exc()})
+            print(traceback.format_exc())
+            yield _sse({
+                "status": "error",
+                "message": "Generation failed. Please review the server logs and try again.",
+            })
 
     return Response(
         stream_with_context(stream()),
@@ -96,7 +134,7 @@ def generate():
 def download(filename: str):
     # Prevent path traversal
     safe = PROJECT_DIR / Path(filename).name
-    if not safe.exists():
+    if safe.suffix.lower() != ".pdf" or not safe.exists():
         return jsonify({"error": "File not found."}), 404
     return send_file(safe, as_attachment=True)
 
