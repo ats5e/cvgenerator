@@ -1,0 +1,31 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# IDE / tooling
+.claude/
+.idea/
+.vscode/
+
+# Build artefacts (generated PDFs and temp HTML)
+_build_*.html
+*.pdf
+
+# Personal source documents — not part of the app
+Job Specs.docx
+*.docx
+*.txt
+!requirements.txt
+ref_cv_image_*.png

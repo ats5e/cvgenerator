@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>$pdf_title</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 0;
+        }
+
+        :root {
+            --paper: #f5f1ec;
+            --ink: #1f1a16;
+            --muted: #6b625c;
+            --accent: #8a4a2b;
+            --rule: #d9d0c8;
+            --badge: #221d19;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            background: var(--paper);
+        }
+
+        body {
+            background: var(--paper);
+            color: var(--ink);
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            font-size: 9pt;
+            line-height: 1.45;
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .document {
+            background: var(--paper);
+            padding: 14mm 34px 12mm;
+            -webkit-box-decoration-break: clone;
+            box-decoration-break: clone;
+        }
+
+        .header {
+            align-items: flex-start;
+            display: flex;
+            gap: 24px;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .header-copy {
+            flex: 1;
+            min-width: 0;
+            padding-top: 4px;
+        }
+
+        .header-image {
+            width: 116px;
+            height: 116px;
+            border: 2px solid #d7cec6;
+            border-radius: 50%;
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+
+        .name {
+            font-family: Baskerville, Georgia, "Times New Roman", serif;
+            font-size: 34pt;
+            line-height: 1;
+            margin-bottom: 8px;
+            white-space: nowrap;
+        }
+
+        .first-name {
+            color: var(--accent);
+            display: inline;
+            font-style: italic;
+        }
+
+        .last-name {
+            color: var(--ink);
+            display: inline;
+        }
+
+        .tagline {
+            color: #433b35;
+            font-family: Baskerville, Georgia, "Times New Roman", serif;
+            font-size: 10.2pt;
+            font-style: italic;
+            margin-bottom: 8px;
+        }
+
+        .contact-line {
+            color: var(--muted);
+            font-size: 7.7pt;
+            margin-bottom: 10px;
+        }
+
+        .stats-row {
+            border-bottom: 1px solid var(--ink);
+            border-top: 1px solid var(--rule);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 14px;
+            padding: 7px 0 6px;
+        }
+
+        .stat {
+            align-items: baseline;
+            display: flex;
+            gap: 5px;
+        }
+
+        .stat-number {
+            color: var(--accent);
+            font-family: Baskerville, Georgia, "Times New Roman", serif;
+            font-size: 15pt;
+            line-height: 1;
+        }
+
+        .stat-label {
+            color: var(--muted);
+            font-size: 6.1pt;
+            letter-spacing: 1.4px;
+            text-transform: uppercase;
+        }
+
+        .section {
+            margin-top: 12px;
+        }
+
+        .section-heading {
+            align-items: baseline;
+            display: flex;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .section-number {
+            color: var(--accent);
+            font-family: Baskerville, Georgia, "Times New Roman", serif;
+            font-size: 15pt;
+        }
+
+        .section-title {
+            color: var(--ink);
+            font-family: Baskerville, Georgia, "Times New Roman", serif;
+            font-size: 15.5pt;
+            font-style: italic;
+        }
+
+        .section-rule {
+            border: none;
+            border-top: 1px solid var(--rule);
+            margin-bottom: 6px;
+        }
+
+        .profile-text {
+            color: #423a34;
+            font-size: 8.7pt;
+            line-height: 1.6;
+        }
+
+        .drop-cap {
+            color: var(--accent);
+            float: left;
+            font-family: Baskerville, Georgia, "Times New Roman", serif;
+            font-size: 13pt;
+            font-style: italic;
+            line-height: 1;
+            margin-right: 1px;
+        }
+
+        .skills-grid {
+            column-gap: 22px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            row-gap: 3px;
+        }
+
+        .skill {
+            font-size: 8.7pt;
+            padding-left: 10px;
+            position: relative;
+        }
+
+        .skill::before {
+            background: var(--accent);
+            border-radius: 50%;
+            content: "";
+            height: 4px;
+            left: 0;
+            position: absolute;
+            top: 0.58em;
+            width: 4px;
+        }
+
+        .job {
+            break-inside: avoid;
+            padding: 5px 0 6px;
+        }
+
+        .job + .job {
+            border-top: 1px solid #e2d9d1;
+        }
+
+        .job-top {
+            align-items: baseline;
+            display: flex;
+            gap: 12px;
+            justify-content: space-between;
+        }
+
+        .job-title {
+            font-size: 9.4pt;
+            font-weight: 700;
+        }
+
+        .job-date {
+            color: var(--muted);
+            font-size: 7.1pt;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .job-company-line {
+            margin-top: 1px;
+        }
+
+        .job-company {
+            color: var(--accent);
+            font-family: Baskerville, Georgia, "Times New Roman", serif;
+            font-size: 9.8pt;
+            font-style: italic;
+        }
+
+        .job-location {
+            color: var(--muted);
+            font-size: 8pt;
+        }
+
+        .job-bullets {
+            list-style: none;
+            margin-top: 3px;
+        }
+
+        .job-bullets li {
+            font-size: 8.55pt;
+            line-height: 1.45;
+            margin-top: 2px;
+            padding-left: 11px;
+            position: relative;
+        }
+
+        .job-bullets li::before {
+            color: var(--accent);
+            content: "-";
+            left: 0;
+            position: absolute;
+            top: 0;
+        }
+
+        .education-item {
+            break-inside: avoid;
+            padding: 4px 0;
+        }
+
+        .education-item + .education-item {
+            border-top: 1px solid #e2d9d1;
+        }
+
+        .edu-top {
+            align-items: baseline;
+            display: flex;
+            gap: 12px;
+            justify-content: space-between;
+        }
+
+        .edu-degree {
+            font-size: 9.3pt;
+            font-weight: 700;
+        }
+
+        .edu-year {
+            color: var(--muted);
+            font-size: 7.1pt;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .edu-school {
+            color: var(--accent);
+            display: block;
+            font-family: Baskerville, Georgia, "Times New Roman", serif;
+            font-size: 9.7pt;
+            font-style: italic;
+            margin-top: 1px;
+        }
+
+        .edu-details {
+            color: var(--muted);
+            font-size: 8.2pt;
+            margin-top: 2px;
+        }
+
+        .footer {
+            border-top: 1px solid var(--ink);
+            margin-top: 16px;
+            padding-top: 8px;
+            text-align: center;
+        }
+
+        .footer-title {
+            color: var(--ink);
+            font-size: 6.8pt;
+            letter-spacing: 1.7px;
+            text-transform: uppercase;
+        }
+
+        .footer-subtitle {
+            color: var(--muted);
+            font-size: 6.7pt;
+            letter-spacing: 1.3px;
+            margin-top: 2px;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+    <div class="document">
+        <div class="header">
+            <div class="header-copy">
+                <div class="name">
+                    <span class="first-name">$first_name</span>
+                    <span class="last-name">$last_name</span>
+                </div>
+
+                <div class="tagline">$tagline</div>
+                <div class="contact-line">$contact_line</div>
+            </div>
+
+            <img class="header-image" src="$img_path" alt="Du-Toit Griesel headshot">
+        </div>
+
+        <div class="stats-row">
+$stats_html
+        </div>
+
+        <section class="section">
+            <div class="section-heading">
+                <span class="section-number">01</span>
+                <span class="section-title">Profile</span>
+            </div>
+            <hr class="section-rule">
+            <div class="profile-text">
+                <span class="drop-cap">$summary_initial</span>$summary_rest
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-heading">
+                <span class="section-number">02</span>
+                <span class="section-title">Core Competencies</span>
+            </div>
+            <hr class="section-rule">
+            <div class="skills-grid">
+$skills_html
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-heading">
+                <span class="section-number">03</span>
+                <span class="section-title">Professional Experience</span>
+            </div>
+            <hr class="section-rule">
+$experience_html
+        </section>
+
+        <section class="section">
+            <div class="section-heading">
+                <span class="section-number">04</span>
+                <span class="section-title">Education</span>
+            </div>
+            <hr class="section-rule">
+$education_html
+        </section>
+
+        <div class="footer">
+            <div class="footer-title">$first_name $last_name | $footer_title | Dubai, UAE</div>
+            <div class="footer-subtitle">$footer_subtitle</div>
+        </div>
+    </div>
+</body>
+</html>
