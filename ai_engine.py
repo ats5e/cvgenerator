@@ -72,9 +72,11 @@ a tailored CV configuration and cover letter for Du-Toit Griesel that will:
 
 ATS OPTIMISATION RULES (critical — follow these precisely):
 - Extract the 12-18 most important keyword PHRASES from the JD (not single words; multi-word phrases score better)
-- Use these exact phrases, not synonyms, in the summary and skills list
+- Use exact JD phrases selectively in the summary and ATS keywords where they genuinely fit
 - Mirror the JD's vocabulary throughout — if it says "stakeholder engagement", use that, not "client management"
 - Order skills by their frequency and prominence in the JD (most critical first)
+- Skills must be concise CV-ready competency labels grounded in Du-Toit's real experience, not copied JD sentences
+- Each skill must read like a professional capability heading, not a responsibility, requirement, or qualification
 - Experience bullets should directly echo JD requirements — address them head-on
 - Summary should sound natural, while embedding JD keywords seamlessly
 - Keep experience bullets under 22 words — punchy, active, specific
@@ -97,7 +99,7 @@ JSON_SCHEMA = """
   "role_badge": "string — role title in ALL CAPS, max 4 words",
   "tagline": "string — three short keyword phrases separated by | (e.g. 'Brand Strategy | Regional Rollout | Stakeholder Management')",
   "summary": "string — two-sentence CV profile summary. Embed ATS keywords naturally. Do NOT use 'I' — write in implied third person (e.g. 'Brand Manager with...'). End both sentences with a full stop.",
-  "skills": ["string array of exactly 10 skills, ordered by JD priority, using exact JD terminology"],
+  "skills": ["string array of exactly 10 concise core competencies ordered by JD priority. Each item must be a CV-ready skill heading of 1-4 words, grounded in Du-Toit's actual experience. Do not output requirement sentences, education requirements, language requirements, or copied JD bullets."],
   "experience_overrides": {
     "0": ["string bullet 1 for Yellow SAM role (current, Dubai)", "string bullet 2"],
     "1": ["string bullet 1 for Yellow AM role (Dubai)", "string bullet 2"]
@@ -126,6 +128,9 @@ Return a JSON object matching this schema exactly:
 Remember:
 - company_name should be the hiring company (not the recruiter if different)
 - target_role should be the exact title from the JD
+- Skills must be intelligent CV competencies, not copied job requirements
+- Each skill should be short, specific, and believable from Du-Toit's background
+- Never include items like degree requirements, language requirements, 'proven experience', or long JD-style responsibility lines in skills
 - Read the full job description before drafting the cover letter
 - All four cover_letter_paragraphs must be written in first person singular in DT's voice — confident, professional, genuine
 - The cover letter must use I/my/me and must never refer to DT by name or as he/him/his
@@ -140,6 +145,14 @@ FIRST_PERSON_PATTERN = re.compile(
 )
 THIRD_PERSON_PATTERN = re.compile(
     r"\b(du-toit|dt|he|him|his)\b",
+    flags=re.IGNORECASE,
+)
+SKILL_REQUIREMENT_PATTERN = re.compile(
+    r"\b("
+    r"bachelor|degree|required|preferred|must|plus|proficiency|english|languages|"
+    r"track record|proven experience|strong understanding|adept at|ability to|"
+    r"experience managing|managing multiple|presenting concepts|award-winning"
+    r")\b",
     flags=re.IGNORECASE,
 )
 
@@ -157,6 +170,79 @@ def _cover_letter_needs_first_person_rewrite(paragraphs: list[str]) -> bool:
     third_person_hits = len(THIRD_PERSON_PATTERN.findall(combined))
 
     return first_person_hits == 0 or third_person_hits > first_person_hits
+
+
+def _skills_need_polish(skills: list[str]) -> bool:
+    cleaned = [str(skill).strip() for skill in skills if str(skill).strip()]
+    if len(cleaned) != 10:
+        return True
+
+    for skill in cleaned:
+        words = re.findall(r"[A-Za-z0-9&/+\-']+", skill)
+        if len(words) == 0 or len(words) > 6:
+            return True
+        if any(mark in skill for mark in [",", ";", ":"]):
+            return True
+        if SKILL_REQUIREMENT_PATTERN.search(skill):
+            return True
+
+    return False
+
+
+def _polish_skills(
+    client: OpenAI,
+    company_name: str,
+    target_role: str,
+    job_description: str,
+    skills: list[str],
+) -> list[str]:
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        temperature=0.2,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are refining the core competencies section of a CV for Du-Toit Griesel. "
+                    "Read the full job description carefully. "
+                    "Return exactly 10 concise, CV-ready skill headings grounded in the candidate's real experience. "
+                    "Use JD vocabulary where appropriate, but do not copy JD sentences or requirements. "
+                    "Each skill must be 1-4 words where possible and read like a professional competency heading."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"{CANDIDATE_CONTEXT}\n\n"
+                    "JOB DESCRIPTION:\n"
+                    f"{job_description.strip()}\n\n"
+                    "CURRENT SKILLS:\n"
+                    f"{json.dumps(skills, ensure_ascii=False)}\n\n"
+                    "Rewrite the skills list for the CV. Requirements:\n"
+                    "- Return exactly 10 items\n"
+                    "- Use concise CV competency headings, not sentences\n"
+                    "- Ground every item in Du-Toit's actual experience\n"
+                    "- Reflect the role brief intelligently, not mechanically\n"
+                    "- Avoid education, language, eligibility, or requirement statements\n"
+                    "- Avoid phrases like 'proven experience', 'strong understanding', or copied JD bullets\n"
+                    "- Order items by relevance to the role\n"
+                    "- Return only JSON with {\"skills\":[...]} for "
+                    f"{company_name} / {target_role}"
+                ),
+            },
+        ],
+    )
+
+    raw = response.choices[0].message.content.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
+    raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
+    data = json.loads(raw)
+
+    polished = [str(item).strip() for item in data.get("skills", []) if str(item).strip()]
+    if len(polished) == 10:
+        return polished
+    return skills
 
 
 def _rewrite_cover_letter_first_person(
@@ -302,6 +388,19 @@ def _call_llm(job_description: str) -> dict:
     raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
 
     data = json.loads(raw)
+
+    skills = [str(item).strip() for item in data.get("skills", []) if str(item).strip()]
+    if skills and _skills_need_polish(skills):
+        try:
+            data["skills"] = _polish_skills(
+                client,
+                data.get("company_name", "Company"),
+                data.get("target_role", "Role"),
+                job_description,
+                skills,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     paragraphs = [str(item).strip() for item in data.get("cover_letter_paragraphs", []) if str(item).strip()]
     focus = str(data.get("cover_letter_focus", "")).strip()
