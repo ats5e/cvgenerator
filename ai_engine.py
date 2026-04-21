@@ -80,8 +80,12 @@ ATS OPTIMISATION RULES (critical — follow these precisely):
 - Keep experience bullets under 22 words — punchy, active, specific
 - The role_badge must be max 4 words in ALL CAPS
 - The CV summary is not a cover letter: do not use "I" there
+- Read the full job description carefully before writing anything
 - The cover letter must be written in first person singular using "I", "me", and "my"
 - Never refer to the candidate in the cover letter as "Du-Toit", "DT", "he", "him", or "his"
+- The cover letter must be concise, engaging, and clearly structured in four short paragraphs
+- The cover letter must pull from Du-Toit's real experience and connect the most relevant roles and strengths to the brief
+- Avoid generic filler, repetition, or empty enthusiasm; every sentence should add value
 
 OUTPUT FORMAT: Return ONLY valid JSON, no markdown fences, no explanation. The JSON must match
 this exact schema with all field names spelled exactly as shown."""
@@ -102,10 +106,10 @@ JSON_SCHEMA = """
   "cover_letter_recipient": "string — e.g. 'Dear [Company] Hiring Team,'",
   "cover_letter_focus": "string — 3-5 word summary of the letter's angle",
   "cover_letter_paragraphs": [
-    "string — opening paragraph (2-3 sentences) written in first person singular using I/my/me: state role, years experience, and why I am a strong fit",
-    "string — experience paragraph (3-4 sentences) written in first person singular using I/my/me: specific skills and achievements directly relevant to JD",
-    "string — company/role fit paragraph (2-3 sentences) written in first person singular using I/my/me: what attracts me to this specific company/role",
-    "string — closing paragraph (1-2 sentences) written in first person singular using I/my/me: call to action and thank you"
+    "string — opening paragraph (2-3 sentences, concise and engaging) written in first person singular using I/my/me: state role, years experience, and strongest fit for the brief",
+    "string — experience paragraph (2-3 sentences, concise and specific) written in first person singular using I/my/me: draw directly from Du-Toit's most relevant real experience and strengths for the JD",
+    "string — company/role fit paragraph (2-3 sentences, concise and grounded) written in first person singular using I/my/me: what attracts me to this specific company/role and why that fit makes sense",
+    "string — closing paragraph (1-2 sentences, tight and confident) written in first person singular using I/my/me: call to action and thank you"
   ]
 }"""
 
@@ -122,9 +126,12 @@ Return a JSON object matching this schema exactly:
 Remember:
 - company_name should be the hiring company (not the recruiter if different)
 - target_role should be the exact title from the JD
+- Read the full job description before drafting the cover letter
 - All four cover_letter_paragraphs must be written in first person singular in DT's voice — confident, professional, genuine
 - The cover letter must use I/my/me and must never refer to DT by name or as he/him/his
+- The cover letter should be concise, engaging, and well structured
 - The cover letter should reference specifics from the JD, not generic marketing fluff
+- The cover letter should explicitly pull from Du-Toit's real agency experience where relevant
 - experience_overrides bullets must directly address what the JD asks for"""
 
 FIRST_PERSON_PATTERN = re.compile(
@@ -195,6 +202,75 @@ def _rewrite_cover_letter_first_person(
     return paragraphs
 
 
+def _polish_cover_letter(
+    client: OpenAI,
+    company_name: str,
+    target_role: str,
+    job_description: str,
+    focus: str,
+    paragraphs: list[str],
+) -> tuple[str, list[str]]:
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        temperature=0.2,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are polishing a professional cover letter for Du-Toit Griesel. "
+                    "Read the full job description before writing. "
+                    "Return a concise, engaging, highly tailored four-paragraph cover letter in first person singular. "
+                    "Use only real experience from the candidate context and the draft. "
+                    "Make the structure sharp: opening fit, relevant experience, company/role fit, concise close. "
+                    "Avoid generic filler, repetition, and vague praise. "
+                    "Never refer to the candidate by name or as he/him/his. "
+                    "Keep the tone confident, warm, and commercial."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"{CANDIDATE_CONTEXT}\n\n"
+                    "JOB DESCRIPTION:\n"
+                    f"{job_description.strip()}\n\n"
+                    "CURRENT COVER LETTER FOCUS:\n"
+                    f"{focus or 'Tailored role fit'}\n\n"
+                    "CURRENT COVER LETTER PARAGRAPHS:\n"
+                    f"{json.dumps(paragraphs, ensure_ascii=False)}\n\n"
+                    "Rewrite this into the strongest possible concise cover letter. Requirements:\n"
+                    "- Write in first person singular using I/my/me\n"
+                    "- Keep exactly 4 paragraphs\n"
+                    "- Make it engaging from the first sentence\n"
+                    "- Show that you have read the full job description, not just the title\n"
+                    "- Pull from Du-Toit's most relevant real experience and strengths\n"
+                    "- Connect those experiences directly to the brief\n"
+                    "- Keep it concise and structured, with no fluff\n"
+                    "- Do not invent metrics, employers, responsibilities, or achievements\n"
+                    "- Return only JSON with keys cover_letter_focus and cover_letter_paragraphs\n"
+                    '- cover_letter_paragraphs must be an array of exactly 4 strings'
+                ),
+            },
+        ],
+    )
+
+    raw = response.choices[0].message.content.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
+    raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
+    data = json.loads(raw)
+
+    polished_focus = str(data.get("cover_letter_focus", focus or "")).strip()
+    polished_paragraphs = [
+        str(item).strip()
+        for item in data.get("cover_letter_paragraphs", [])
+        if str(item).strip()
+    ]
+
+    if len(polished_paragraphs) == 4:
+        return polished_focus, polished_paragraphs
+    return focus, paragraphs
+
+
 def _call_llm(job_description: str) -> dict:
     """Call OpenAI API (JSON mode) and return parsed JSON config."""
     api_key = os.getenv("OPENAI_API_KEY")
@@ -228,6 +304,26 @@ def _call_llm(job_description: str) -> dict:
     data = json.loads(raw)
 
     paragraphs = [str(item).strip() for item in data.get("cover_letter_paragraphs", []) if str(item).strip()]
+    focus = str(data.get("cover_letter_focus", "")).strip()
+
+    if paragraphs:
+        try:
+            polished_focus, polished_paragraphs = _polish_cover_letter(
+                client,
+                data.get("company_name", "Company"),
+                data.get("target_role", "Role"),
+                job_description,
+                focus,
+                paragraphs,
+            )
+            if polished_focus:
+                data["cover_letter_focus"] = polished_focus
+            if polished_paragraphs:
+                data["cover_letter_paragraphs"] = polished_paragraphs
+                paragraphs = polished_paragraphs
+        except Exception:  # noqa: BLE001
+            pass
+
     if _cover_letter_needs_first_person_rewrite(paragraphs):
         try:
             data["cover_letter_paragraphs"] = _rewrite_cover_letter_first_person(
