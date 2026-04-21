@@ -524,14 +524,14 @@
                     <div>
                         <div class="section-title">Downloads</div>
                         <div style="display: flex; gap: 10px;">
-                            <a id="dlCv" class="btn btn-download disabled" href="#" download>
+                            <button id="dlCv" type="button" class="btn btn-download disabled">
                                 <span>Tailored CV</span>
                                 <span class="dl-icon">↓</span>
-                            </a>
-                            <a id="dlLetter" class="btn btn-download disabled" href="#" download>
+                            </button>
+                            <button id="dlLetter" type="button" class="btn btn-download disabled">
                                 <span>Cover Letter</span>
                                 <span class="dl-icon">↓</span>
-                            </a>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -627,18 +627,49 @@
             progressBar.style.width = pct + '%';
         }
 
-        function setDownload(anchor, href, filename) {
-            anchor.href = href;
-            anchor.download = filename;
-            anchor.classList.remove('disabled');
+        async function triggerDownload(url, filename) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+                pushLog(`Downloaded ${filename}`, 'success');
+            } catch (err) {
+                pushLog(`Download failed: ${err.message}`, 'error');
+            }
+        }
+
+        function setDownload(button, url, filename) {
+            button.dataset.url = url;
+            button.dataset.filename = filename;
+            button.classList.remove('disabled');
         }
 
         function disableDownloads() {
-            [dlCv, dlLetter].forEach(a => {
-                a.href = '#';
-                a.classList.add('disabled');
+            [dlCv, dlLetter].forEach(b => {
+                delete b.dataset.url;
+                delete b.dataset.filename;
+                b.classList.add('disabled');
             });
         }
+
+        function handleDownloadClick(e) {
+            const btn = e.currentTarget;
+            const url = btn.dataset.url;
+            const filename = btn.dataset.filename;
+            if (!url) return;
+            triggerDownload(url, filename);
+        }
+
+        dlCv.addEventListener('click', handleDownloadClick);
+        dlLetter.addEventListener('click', handleDownloadClick);
 
         function renderKeywords(keywords) {
             outKeywords.innerHTML = '';
