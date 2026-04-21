@@ -4,12 +4,15 @@ import copy
 import html
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from string import Template
 
+from pdf_fallback import build_cv_pdf_bytes
 
 CHROME_PATH = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 PROJECT_DIR = Path(__file__).resolve().parent
+RUNTIME_OUTPUT_DIR = Path(tempfile.gettempdir()) / "dt_cv_generator"
 
 PROFILE = {
     "first_name": "Du-Toit",
@@ -675,9 +678,16 @@ def get_cv_template_path(options: dict | None = None) -> Path:
     return PROJECT_DIR / template_name
 
 
+def get_runtime_output_dir() -> Path:
+    RUNTIME_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    return RUNTIME_OUTPUT_DIR
+
+
 def build_context(config: dict, image_uri: str, options: dict | None = None) -> dict:
     resolved = normalize_render_options(options)
     summary = config["summary"].strip()
+    initial = summary[0] if summary else ""
+    rest = summary[1:] if len(summary) > 1 else ""
     return {
         "pdf_title": escape(f"Du-Toit Griesel - {config['pdf_title']} - CV"),
         "role_badge": escape(config["role_badge"]),
@@ -685,8 +695,8 @@ def build_context(config: dict, image_uri: str, options: dict | None = None) -> 
         "last_name": escape(PROFILE["last_name"]),
         "tagline": escape(config["tagline"]),
         "contact_line": escape(build_contact_line(resolved)),
-        "summary_initial": escape(summary[0]),
-        "summary_rest": escape(summary[1:]),
+        "summary_initial": escape(initial),
+        "summary_rest": escape(rest),
         "stats_section_html": render_stats_section(config.get("stats", COMMON_STATS), resolved),
         "skills_html": render_skills(config["skills"]),
         "experience_html": render_experience(build_experience(config)),
@@ -701,56 +711,11 @@ def render_html(template_text: str, context: dict) -> str:
     return Template(template_text).substitute(context)
 
 
-def render_cvs() -> None:
-    options = normalize_render_options()
-    template_text = get_cv_template_path(options).read_text(encoding="utf-8")
-    image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
-
-    for config in ROLE_CONFIGS:
-        context = build_context(config, image_uri, options)
-        html_output = render_html(template_text, context)
-        temp_html_path = PROJECT_DIR / f"_build_{slugify(config['filename_suffix'])}.html"
-        output_pdf_path = PROJECT_DIR / build_output_filename(config, options)
-
-        temp_html_path.write_text(html_output, encoding="utf-8")
-        print(f"Generating {output_pdf_path.name}...", end=" ")
-
-        command = [
-            str(CHROME_PATH),
-            "--headless",
-            "--no-sandbox",
-            "--disable-gpu",
-            "--no-pdf-header-footer",
-            "--allow-file-access-from-files",
-            f"--print-to-pdf={output_pdf_path}",
-            temp_html_path.resolve().as_uri(),
-        ]
-
-        try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
-            print("Success.")
-        except subprocess.CalledProcessError as error:
-            print("Failed.")
-            if error.stderr:
-                print(error.stderr.strip())
-        finally:
-            temp_html_path.unlink(missing_ok=True)
+def chrome_available() -> bool:
+    return CHROME_PATH.exists()
 
 
-def generate_cv_for_config(config: dict, options: dict | None = None) -> Path:
-    """Generate a CV PDF for a single config dict. Returns the output PDF Path."""
-    resolved = normalize_render_options(options)
-    template_text = get_cv_template_path(resolved).read_text(encoding="utf-8")
-    image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
-
-    context = build_context(config, image_uri, resolved)
-    html_output = render_html(template_text, context)
-
-    temp_html_path = PROJECT_DIR / f"_build_{slugify(config['filename_suffix'])}.html"
-    output_pdf_path = PROJECT_DIR / build_output_filename(config, resolved)
-
-    temp_html_path.write_text(html_output, encoding="utf-8")
-
+def _run_chrome_pdf(temp_html_path: Path, output_pdf_path: Path) -> None:
     command = [
         str(CHROME_PATH),
         "--headless",
@@ -767,14 +732,68 @@ def generate_cv_for_config(config: dict, options: dict | None = None) -> Path:
     except subprocess.CalledProcessError as error:
         if error.stderr:
             raise RuntimeError(f"Chrome PDF error: {error.stderr.strip()}") from error
-    finally:
-        temp_html_path.unlink(missing_ok=True)
+        raise RuntimeError("Chrome PDF generation failed.") from error
 
+
+def generate_cv_bytes(config: dict, options: dict | None = None) -> tuple[str, bytes]:
+    resolved = normalize_render_options(options)
+    filename = build_output_filename(config, resolved)
+    chrome_error: RuntimeError | None = None
+
+    if chrome_available():
+        template_text = get_cv_template_path(resolved).read_text(encoding="utf-8")
+        image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
+        context = build_context(config, image_uri, resolved)
+        html_output = render_html(template_text, context)
+        temp_html_path = PROJECT_DIR / f"_build_{slugify(config['filename_suffix'])}.html"
+        output_pdf_path = PROJECT_DIR / filename
+        temp_html_path.write_text(html_output, encoding="utf-8")
+
+        try:
+            _run_chrome_pdf(temp_html_path, output_pdf_path)
+            return filename, output_pdf_path.read_bytes()
+        except RuntimeError as error:
+            chrome_error = error
+        finally:
+            temp_html_path.unlink(missing_ok=True)
+            output_pdf_path.unlink(missing_ok=True)
+
+    try:
+        pdf_bytes = build_cv_pdf_bytes(
+            profile=PROFILE,
+            config=config,
+            experience=build_experience(config),
+            education=BASE_EDUCATION,
+            stats=config.get("stats", COMMON_STATS),
+            contact_line=build_contact_line(resolved),
+            options=resolved,
+            image_path=PROJECT_DIR / "cropped_circle_image.png",
+        )
+    except RuntimeError as error:
+        if chrome_error is not None:
+            raise RuntimeError(f"{chrome_error} Fallback renderer also failed: {error}") from error
+        raise
+    return filename, pdf_bytes
+
+
+def render_cvs() -> None:
+    for config in ROLE_CONFIGS:
+        filename, pdf_bytes = generate_cv_bytes(config)
+        output_path = PROJECT_DIR / filename
+        print(f"Generating {output_path.name}...", end=" ")
+        output_path.write_bytes(pdf_bytes)
+        print("Success.")
+
+
+def generate_cv_for_config(config: dict, options: dict | None = None) -> Path:
+    """Generate a CV PDF for a single config dict. Returns the output PDF Path."""
+    filename, pdf_bytes = generate_cv_bytes(config, options)
+    output_pdf_path = get_runtime_output_dir() / filename
+    output_pdf_path.write_bytes(pdf_bytes)
     return output_pdf_path
 
 
 if __name__ == "__main__":
     if not CHROME_PATH.exists():
-        print(f"Chrome not found at {CHROME_PATH}")
-    else:
-        render_cvs()
+        print(f"Chrome not found at {CHROME_PATH}; using PDF fallback when available.")
+    render_cvs()

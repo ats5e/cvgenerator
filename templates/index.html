@@ -1084,6 +1084,20 @@
             border-color: rgba(232, 177, 123, 0.34);
         }
 
+        .history-note {
+            display: inline-flex;
+            align-items: center;
+            min-height: 44px;
+            padding: 0 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--muted);
+            background: rgba(255, 255, 255, 0.03);
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
         .spinner {
             width: 16px;
             height: 16px;
@@ -1400,7 +1414,7 @@
             <div class="history-head">
                 <div>
                     <h2>Recent Applications</h2>
-                    <p>Your last 20 generated application packs are stored locally in this browser for quick re-download.</p>
+                    <p>Your last 20 generated application packs are stored locally in this browser for quick reference.</p>
                 </div>
             </div>
 
@@ -1438,8 +1452,9 @@
         const dlLetter = $("dlLetter");
         const historyList = $("historyList");
         const segmentedButtons = [...document.querySelectorAll(".segmented-btn")];
+        const liveDownloads = { cv: null, letter: null };
 
-        const HISTORY_KEY = "dt_cv_history_v3";
+        const HISTORY_KEY = "dt_cv_history_v4";
         const PROGRESS_STEPS = {
             analysing: 20,
             keywords: 46,
@@ -1554,47 +1569,67 @@
             renderOptionChips(resolved);
         }
 
-        async function triggerDownload(url, filename) {
+        function base64ToBlob(base64, mimeType = "application/pdf") {
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let index = 0; index < binary.length; index += 1) {
+                bytes[index] = binary.charCodeAt(index);
+            }
+            return new Blob([bytes], { type: mimeType });
+        }
+
+        async function triggerDownload(payload) {
             try {
-                const response = await fetch(url);
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
+                let blob;
+                if (payload.url) {
+                    const response = await fetch(payload.url);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    blob = await response.blob();
+                } else if (payload.base64) {
+                    blob = base64ToBlob(payload.base64);
+                } else {
+                    throw new Error("No document available.");
                 }
-                const blob = await response.blob();
                 const blobUrl = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = blobUrl;
-                a.download = filename;
+                a.download = payload.filename;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
-                pushLog(`Downloaded ${filename}`, "success");
+                pushLog(`Downloaded ${payload.filename}`, "success");
             } catch (err) {
                 pushLog(`Download failed: ${err.message}`, "error");
             }
         }
 
-        function setDownload(button, url, filename) {
-            button.dataset.url = url;
-            button.dataset.filename = filename;
+        function setDownload(button, slot, payload) {
+            liveDownloads[slot] = payload;
+            button.dataset.slot = slot;
+            button.dataset.filename = payload.filename || "";
             button.classList.remove("disabled");
         }
 
         function disableDownloads() {
             [dlCv, dlLetter].forEach((button) => {
-                delete button.dataset.url;
+                delete button.dataset.slot;
                 delete button.dataset.filename;
                 button.classList.add("disabled");
             });
+            liveDownloads.cv = null;
+            liveDownloads.letter = null;
         }
 
         function handleDownloadClick(event) {
             const button = event.currentTarget;
-            if (!button.dataset.url) {
+            const slot = button.dataset.slot;
+            if (!slot || !liveDownloads[slot]) {
                 return;
             }
-            triggerDownload(button.dataset.url, button.dataset.filename);
+            triggerDownload(liveDownloads[slot]);
         }
 
         dlCv.addEventListener("click", handleDownloadClick);
@@ -1656,15 +1691,25 @@
             items.forEach((item) => {
                 const row = document.createElement("div");
                 row.className = "history-item";
+                const actionsHtml =
+                    item.cv_url && item.letter_url
+                        ? `
+                    <div class="history-actions">
+                        <a href="${item.cv_url}" download>CV</a>
+                        <a href="${item.letter_url}" download>Letter</a>
+                    </div>
+                `
+                        : `
+                    <div class="history-actions">
+                        <span class="history-note">Session download</span>
+                    </div>
+                `;
                 row.innerHTML = `
                     <div class="history-left">
                         <h4></h4>
                         <p></p>
                     </div>
-                    <div class="history-actions">
-                        <a href="${item.cv_url}" download>CV</a>
-                        <a href="${item.letter_url}" download>Letter</a>
-                    </div>
+                    ${actionsHtml}
                 `;
                 row.querySelector("h4").textContent = `${item.company} | ${item.role}`;
                 row.querySelector("p").textContent =
@@ -1757,18 +1802,22 @@
                 setStatus("Ready to download", "ok");
                 outRecipient.textContent = ev.recipient || outRecipient.textContent || "Dear Hiring Team,";
                 renderRenderOptions(ev.render_options);
-                const cvFile = decodeURIComponent(ev.cv_url.split("/").pop());
-                const letterFile = decodeURIComponent(ev.letter_url.split("/").pop());
-                setDownload(dlCv, ev.cv_url, cvFile);
-                setDownload(dlLetter, ev.letter_url, letterFile);
+                const cvPayload = ev.cv_pdf_base64
+                    ? { base64: ev.cv_pdf_base64, filename: ev.cv_filename || "Tailored CV.pdf" }
+                    : { url: ev.cv_url, filename: decodeURIComponent(ev.cv_url.split("/").pop()) };
+                const letterPayload = ev.letter_pdf_base64
+                    ? { base64: ev.letter_pdf_base64, filename: ev.letter_filename || "Cover Letter.pdf" }
+                    : { url: ev.letter_url, filename: decodeURIComponent(ev.letter_url.split("/").pop()) };
+                setDownload(dlCv, "cv", cvPayload);
+                setDownload(dlLetter, "letter", letterPayload);
                 addToHistory({
                     company: ev.company,
                     role: ev.role,
                     recipient: ev.recipient,
                     variant_label: ev.variant_label,
                     render_options: ev.render_options,
-                    cv_url: ev.cv_url,
-                    letter_url: ev.letter_url,
+                    cv_url: ev.cv_url || null,
+                    letter_url: ev.letter_url || null,
                     at: Date.now(),
                 });
                 return;

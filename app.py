@@ -6,6 +6,7 @@ Open:     http://localhost:5000
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -20,11 +21,12 @@ PROJECT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_DIR))
 
 import ai_engine  # noqa: E402 — must be after sys.path update
-from cover_letter_generator import generate_cover_letter_for_config  # noqa: E402
+from cover_letter_generator import generate_cover_letter_bytes  # noqa: E402
 from generator import (  # noqa: E402
     PROFILE,
     build_render_variant_label,
-    generate_cv_for_config,
+    generate_cv_bytes,
+    get_runtime_output_dir,
     normalize_render_options,
 )
 
@@ -91,18 +93,24 @@ def generate():
 
             # Step 2 — CV PDF
             yield _sse({"status": "cv", "message": "Generating tailored CV PDF…"})
-            cv_path = generate_cv_for_config(cv_config, render_options)
+            cv_filename, cv_bytes = generate_cv_bytes(cv_config, render_options)
 
             # Step 3 — Cover letter PDF
             yield _sse({"status": "letter", "message": "Generating tailored cover letter PDF…"})
-            letter_path = generate_cover_letter_for_config(cv_config, cl_content, render_options)
+            letter_filename, letter_bytes = generate_cover_letter_bytes(
+                cv_config,
+                cl_content,
+                render_options,
+            )
 
             # Step 4 — Done
             yield _sse({
                 "status": "done",
                 "message": "Both documents ready.",
-                "cv_url": f"/download/{cv_path.name}",
-                "letter_url": f"/download/{letter_path.name}",
+                "cv_filename": cv_filename,
+                "letter_filename": letter_filename,
+                "cv_pdf_base64": base64.b64encode(cv_bytes).decode("ascii"),
+                "letter_pdf_base64": base64.b64encode(letter_bytes).decode("ascii"),
                 "company": cv_config["company_name"],
                 "role": cv_config["target_role"],
                 "recipient": cl_content.get("recipient", "Dear Hiring Team,"),
@@ -111,12 +119,13 @@ def generate():
                 "variant_label": build_render_variant_label(render_options),
             })
 
-        except Exception:  # noqa: BLE001
+        except Exception as error:  # noqa: BLE001
             import traceback
             print(traceback.format_exc())
             yield _sse({
                 "status": "error",
-                "message": "Generation failed. Please review the server logs and try again.",
+                "message": _friendly_error_message(error),
+                "detail": str(error),
             })
 
     return Response(
@@ -133,7 +142,7 @@ def generate():
 @app.route("/download/<path:filename>")
 def download(filename: str):
     # Prevent path traversal
-    safe = PROJECT_DIR / Path(filename).name
+    safe = get_runtime_output_dir() / Path(filename).name
     if safe.suffix.lower() != ".pdf" or not safe.exists():
         return jsonify({"error": "File not found."}), 404
     return send_file(safe, as_attachment=True)
@@ -145,6 +154,24 @@ def download(filename: str):
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
+
+
+def _friendly_error_message(error: Exception) -> str:
+    raw = str(error).strip() or error.__class__.__name__
+    lowered = raw.lower()
+
+    if "openai_api_key not set" in lowered:
+        return "OPENAI_API_KEY is not configured on the live server."
+    if "api key" in lowered and ("incorrect" in lowered or "invalid" in lowered):
+        return "The configured OpenAI API key was rejected."
+    if "connection" in lowered and "openai" in lowered:
+        return "The server could not reach OpenAI."
+    if "chrome pdf rendering is unavailable" in lowered or "fpdf2 is not installed" in lowered:
+        return "PDF rendering is not configured correctly for this deployment."
+    if "chrome pdf error" in lowered:
+        return "PDF rendering failed on the server."
+
+    return raw[:220]
 
 
 # ---------------------------------------------------------------------------

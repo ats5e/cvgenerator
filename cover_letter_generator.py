@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import subprocess
 from datetime import date
 from pathlib import Path
 from string import Template
 
+from pdf_fallback import build_cover_letter_pdf_bytes
 from generator import (
     CHROME_PATH,
     PROFILE,
@@ -14,9 +14,11 @@ from generator import (
     build_header_image_html,
     build_render_variant_filename_suffix,
     escape,
+    get_runtime_output_dir,
     normalize_render_options,
     sanitize_filename_part,
     slugify,
+    chrome_available,
 )
 
 
@@ -233,30 +235,83 @@ def render_html(template_text: str, context: dict) -> str:
 
 
 def render_pdf(html_output: str, temp_name: str, output_pdf_path: Path) -> None:
-    temp_html_path = PROJECT_DIR / temp_name
+    temp_html_path = get_runtime_output_dir() / temp_name
     temp_html_path.write_text(html_output, encoding="utf-8")
     print(f"Generating {output_pdf_path.name}...", end=" ")
 
-    command = [
-        str(CHROME_PATH),
-        "--headless",
-        "--no-sandbox",
-        "--disable-gpu",
-        "--no-pdf-header-footer",
-        "--allow-file-access-from-files",
-        f"--print-to-pdf={output_pdf_path}",
-        temp_html_path.resolve().as_uri(),
-    ]
-
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        from generator import _run_chrome_pdf
+
+        _run_chrome_pdf(temp_html_path, output_pdf_path)
         print("Success.")
-    except subprocess.CalledProcessError as error:
+    except RuntimeError as error:
         print("Failed.")
-        if error.stderr:
-            print(error.stderr.strip())
+        print(str(error))
     finally:
         temp_html_path.unlink(missing_ok=True)
+
+
+def generate_cover_letter_bytes(config: dict, content: dict, options: dict | None = None) -> tuple[str, bytes]:
+    resolved = normalize_render_options(options)
+    filename = build_cover_letter_filename(config, resolved)
+    chrome_error: RuntimeError | None = None
+
+    if chrome_available():
+        template_text = get_cover_letter_template_path(resolved).read_text(encoding="utf-8")
+        image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
+        meta_items = [
+            {"label": "Target Company", "value": config["company_name"]},
+            {"label": "Opportunity", "value": config["target_role"]},
+            {"label": "Focus", "value": content.get("focus", "")},
+        ]
+        footer_title = f"{config['company_name']} | {config['target_role']}"
+        context = {
+            "pdf_title": escape(f"Du-Toit Griesel - {config['company_name']} - Cover Letter"),
+            "first_name": escape(PROFILE["first_name"]),
+            "last_name": escape(PROFILE["last_name"]),
+            "tagline": escape(config["tagline"]),
+            "contact_line": escape(build_contact_line(resolved)),
+            "meta_section_html": render_meta_section(meta_items, resolved),
+            "letter_date": escape(build_letter_date()),
+            "letter_recipient": escape(content.get("recipient", "Dear Hiring Team,")),
+            "letter_body_html": render_letter_body(content.get("paragraphs", [])),
+            "signoff": "Kind regards,",
+            "signature_name": escape(f"{PROFILE['first_name']} {PROFILE['last_name']}"),
+            "footer_title": escape(footer_title),
+            "footer_subtitle": escape(PROFILE["footer_subtitle"]),
+            "header_image_html": build_header_image_html(image_uri, resolved),
+        }
+        html_output = render_html(template_text, context)
+        temp_name = f"_build_cover_letter_{slugify(config['filename_suffix'])}.html"
+        temp_html_path = PROJECT_DIR / temp_name
+        output_pdf_path = PROJECT_DIR / filename
+        temp_html_path.write_text(html_output, encoding="utf-8")
+        try:
+            from generator import _run_chrome_pdf
+
+            _run_chrome_pdf(temp_html_path, output_pdf_path)
+            return filename, output_pdf_path.read_bytes()
+        except RuntimeError as error:
+            chrome_error = error
+        finally:
+            temp_html_path.unlink(missing_ok=True)
+            output_pdf_path.unlink(missing_ok=True)
+
+    try:
+        pdf_bytes = build_cover_letter_pdf_bytes(
+            profile=PROFILE,
+            config=config,
+            content=content,
+            contact_line=build_contact_line(resolved),
+            letter_date=build_letter_date(),
+            options=resolved,
+            image_path=PROJECT_DIR / "cropped_circle_image.png",
+        )
+    except RuntimeError as error:
+        if chrome_error is not None:
+            raise RuntimeError(f"{chrome_error} Fallback renderer also failed: {error}") from error
+        raise
+    return filename, pdf_bytes
 
 
 def render_cover_letters() -> None:
@@ -269,15 +324,15 @@ def render_cover_letters() -> None:
         raise ValueError(f"Missing cover letter content for: {', '.join(missing)}")
 
     options = normalize_render_options()
-    template_text = get_cover_letter_template_path(options).read_text(encoding="utf-8")
-    image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
-
     for config in ROLE_CONFIGS:
-        context = build_cover_letter_context(config, image_uri, options)
-        html_output = render_html(template_text, context)
-        temp_name = f"_build_cover_letter_{slugify(config['filename_suffix'])}.html"
-        output_pdf_path = PROJECT_DIR / build_cover_letter_filename(config, options)
-        render_pdf(html_output, temp_name, output_pdf_path)
+        filename, pdf_bytes = generate_cover_letter_bytes(
+            config,
+            COVER_LETTER_CONTENT[config["company_name"]],
+            options,
+        )
+        output_pdf_path = PROJECT_DIR / filename
+        output_pdf_path.write_bytes(pdf_bytes)
+        print(f"Generating {output_pdf_path.name}... Success.")
 
 
 def generate_cover_letter_for_config(config: dict, content: dict, options: dict | None = None) -> Path:
@@ -286,44 +341,13 @@ def generate_cover_letter_for_config(config: dict, content: dict, options: dict 
     content must have keys: recipient (str), focus (str), paragraphs (list[str]).
     Returns the output PDF Path.
     """
-    resolved = normalize_render_options(options)
-    template_text = get_cover_letter_template_path(resolved).read_text(encoding="utf-8")
-    image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
-
-    meta_items = [
-        {"label": "Target Company", "value": config["company_name"]},
-        {"label": "Opportunity", "value": config["target_role"]},
-        {"label": "Focus", "value": content.get("focus", "")},
-    ]
-    footer_title = f"{config['company_name']} | {config['target_role']}"
-
-    context = {
-        "pdf_title": escape(f"Du-Toit Griesel - {config['company_name']} - Cover Letter"),
-        "first_name": escape(PROFILE["first_name"]),
-        "last_name": escape(PROFILE["last_name"]),
-        "tagline": escape(config["tagline"]),
-        "contact_line": escape(build_contact_line(resolved)),
-        "meta_section_html": render_meta_section(meta_items, resolved),
-        "letter_date": escape(build_letter_date()),
-        "letter_recipient": escape(content.get("recipient", "Dear Hiring Team,")),
-        "letter_body_html": render_letter_body(content.get("paragraphs", [])),
-        "signoff": "Kind regards,",
-        "signature_name": escape(f"{PROFILE['first_name']} {PROFILE['last_name']}"),
-        "footer_title": escape(footer_title),
-        "footer_subtitle": escape(PROFILE["footer_subtitle"]),
-        "header_image_html": build_header_image_html(image_uri, resolved),
-    }
-
-    html_output = render_html(template_text, context)
-    temp_name = f"_build_cover_letter_{slugify(config['filename_suffix'])}.html"
-    output_pdf_path = PROJECT_DIR / build_cover_letter_filename(config, resolved)
-    render_pdf(html_output, temp_name, output_pdf_path)
-
+    filename, pdf_bytes = generate_cover_letter_bytes(config, content, options)
+    output_pdf_path = get_runtime_output_dir() / filename
+    output_pdf_path.write_bytes(pdf_bytes)
     return output_pdf_path
 
 
 if __name__ == "__main__":
     if not CHROME_PATH.exists():
-        print(f"Chrome not found at {CHROME_PATH}")
-    else:
-        render_cover_letters()
+        print(f"Chrome not found at {CHROME_PATH}; using PDF fallback when available.")
+    render_cover_letters()
