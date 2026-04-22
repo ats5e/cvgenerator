@@ -2,15 +2,20 @@
 app.py
 Flask web server for DT's AI-powered CV & Cover Letter Generator.
 Run with: python app.py
-Open:     http://localhost:5000
+Open:     http://localhost:5050
 """
 from __future__ import annotations
 
-import base64
+import copy
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, wait
+import hashlib
 import json
 import os
 import sys
+import time
 from pathlib import Path
+from threading import Lock
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request, send_file, stream_with_context
@@ -28,10 +33,22 @@ from generator import (  # noqa: E402
     generate_cv_bytes,
     get_runtime_output_dir,
     normalize_render_options,
+    persist_runtime_pdf,
+    prune_runtime_output_dir,
 )
 
 app = Flask(__name__, template_folder=str(PROJECT_DIR / "templates"))
 app.config["PROPAGATE_EXCEPTIONS"] = False
+
+AI_CACHE_TTL_SECONDS = int(os.getenv("AI_CACHE_TTL_SECONDS", "1800"))
+AI_CACHE_MAX_ENTRIES = int(os.getenv("AI_CACHE_MAX_ENTRIES", "32"))
+_ai_cache: dict[str, tuple[float, tuple[dict, dict, list[str]]]] = {}
+_ai_cache_lock = Lock()
+PDF_CACHE_TTL_SECONDS = int(os.getenv("PDF_CACHE_TTL_SECONDS", "1800"))
+PDF_CACHE_MAX_ENTRIES = int(os.getenv("PDF_CACHE_MAX_ENTRIES", "32"))
+_pdf_cache: dict[str, tuple[float, dict]] = {}
+_pdf_cache_lock = Lock()
+STREAM_HEARTBEAT_SECONDS = float(os.getenv("STREAM_HEARTBEAT_SECONDS", "15"))
 
 
 # ---------------------------------------------------------------------------
@@ -67,10 +84,16 @@ def generate():
 
     def stream():
         try:
+            prune_runtime_output_dir()
+            total_started_at = time.perf_counter()
+
             # Step 1 — AI analysis
             yield _sse({"status": "analysing", "message": "Analysing job description with AI…"})
-
-            cv_config, cl_content, keywords = ai_engine.generate_config(job_description)
+            ai_started_at = time.perf_counter()
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                ai_future = executor.submit(_get_generation, job_description)
+                (cv_config, cl_content, keywords), cache_hit = yield from _await_future(ai_future)
+            ai_seconds = round(time.perf_counter() - ai_started_at, 2)
 
             if company_override:
                 cv_config["company_name"] = company_override
@@ -82,41 +105,85 @@ def generate():
 
             yield _sse({
                 "status": "keywords",
-                "message": f"Extracted {len(keywords)} ATS keywords",
+                "message": (
+                    f"Reused cached AI analysis and extracted {len(keywords)} ATS keywords"
+                    if cache_hit else
+                    f"Extracted {len(keywords)} ATS keywords"
+                ),
                 "keywords": keywords,
                 "company": cv_config["company_name"],
                 "role": cv_config["target_role"],
                 "recipient": cl_content.get("recipient", "Dear Hiring Team,"),
                 "render_options": render_options,
                 "variant_label": build_render_variant_label(render_options),
+                "cache_hit": cache_hit,
+                "ai_seconds": ai_seconds,
             })
 
-            # Step 2 — CV PDF
-            yield _sse({"status": "cv", "message": "Generating tailored CV PDF…"})
-            cv_filename, cv_bytes = generate_cv_bytes(cv_config, render_options)
+            # Step 2 — PDF rendering
+            render_cache_key = _render_cache_key(cv_config, cl_content, render_options)
+            cached_render = _get_cached_render(render_cache_key)
 
-            # Step 3 — Cover letter PDF
-            yield _sse({"status": "letter", "message": "Generating tailored cover letter PDF…"})
-            letter_filename, letter_bytes = generate_cover_letter_bytes(
-                cv_config,
-                cl_content,
-                render_options,
-            )
+            if cached_render is not None:
+                yield _sse({"status": "cv", "message": "Reusing cached CV PDF…"})
+                yield _sse({"status": "letter", "message": "Reusing cached cover letter PDF…"})
+                cv_filename = cached_render["cv_filename"]
+                letter_filename = cached_render["letter_filename"]
+                cv_url = _download_url(cached_render["cv_storage_name"], cv_filename)
+                letter_url = _download_url(cached_render["letter_storage_name"], letter_filename)
+                pdf_seconds = 0.0
+                pdf_cache_hit = True
+            else:
+                yield _sse({"status": "cv", "message": "Generating tailored CV PDF…"})
+                yield _sse({"status": "letter", "message": "Generating tailored cover letter PDF…"})
+                pdf_started_at = time.perf_counter()
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    cv_future = executor.submit(generate_cv_bytes, cv_config, render_options)
+                    letter_future = executor.submit(
+                        generate_cover_letter_bytes,
+                        cv_config,
+                        cl_content,
+                        render_options,
+                    )
+                    yield from _await_futures([cv_future, letter_future])
+                    cv_filename, cv_bytes = cv_future.result()
+                    letter_filename, letter_bytes = letter_future.result()
+                pdf_seconds = round(time.perf_counter() - pdf_started_at, 2)
 
-            # Step 4 — Done
+                cv_stored_path = persist_runtime_pdf(cv_filename, cv_bytes)
+                cv_url = _download_url(cv_stored_path.name, cv_filename)
+                letter_stored_path = persist_runtime_pdf(letter_filename, letter_bytes)
+                letter_url = _download_url(letter_stored_path.name, letter_filename)
+                _store_cached_render(
+                    render_cache_key,
+                    {
+                        "cv_filename": cv_filename,
+                        "letter_filename": letter_filename,
+                        "cv_storage_name": cv_stored_path.name,
+                        "letter_storage_name": letter_stored_path.name,
+                    },
+                )
+                pdf_cache_hit = False
+
+            # Step 3 — Done
             yield _sse({
                 "status": "done",
                 "message": "Both documents ready.",
                 "cv_filename": cv_filename,
                 "letter_filename": letter_filename,
-                "cv_pdf_base64": base64.b64encode(cv_bytes).decode("ascii"),
-                "letter_pdf_base64": base64.b64encode(letter_bytes).decode("ascii"),
+                "cv_url": cv_url,
+                "letter_url": letter_url,
                 "company": cv_config["company_name"],
                 "role": cv_config["target_role"],
                 "recipient": cl_content.get("recipient", "Dear Hiring Team,"),
                 "keywords": keywords,
                 "render_options": render_options,
                 "variant_label": build_render_variant_label(render_options),
+                "cache_hit": cache_hit,
+                "ai_seconds": ai_seconds,
+                "pdf_seconds": pdf_seconds,
+                "pdf_cache_hit": pdf_cache_hit,
+                "total_seconds": round(time.perf_counter() - total_started_at, 2),
             })
 
         except Exception as error:  # noqa: BLE001
@@ -145,7 +212,8 @@ def download(filename: str):
     safe = get_runtime_output_dir() / Path(filename).name
     if safe.suffix.lower() != ".pdf" or not safe.exists():
         return jsonify({"error": "File not found."}), 404
-    return send_file(safe, as_attachment=True)
+    download_name = Path((request.args.get("name") or safe.name)).name
+    return send_file(safe, as_attachment=True, download_name=download_name)
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +222,116 @@ def download(filename: str):
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
+
+
+def _sse_comment(comment: str = "keepalive") -> str:
+    return f": {comment}\n\n"
+
+
+def _job_cache_key(job_description: str) -> str:
+    normalized = " ".join(job_description.split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _download_url(storage_name: str, download_name: str) -> str:
+    return f"/download/{quote(storage_name)}?name={quote(download_name)}"
+
+
+def _prune_ai_cache(now: float | None = None) -> None:
+    current = now if now is not None else time.time()
+    expired = [
+        key for key, (created_at, _payload) in _ai_cache.items()
+        if current - created_at > AI_CACHE_TTL_SECONDS
+    ]
+    for key in expired:
+        _ai_cache.pop(key, None)
+
+    while len(_ai_cache) > AI_CACHE_MAX_ENTRIES:
+        oldest_key = min(_ai_cache, key=lambda item: _ai_cache[item][0])
+        _ai_cache.pop(oldest_key, None)
+
+
+def _get_generation(job_description: str) -> tuple[tuple[dict, dict, list[str]], bool]:
+    key = _job_cache_key(job_description)
+    now = time.time()
+
+    with _ai_cache_lock:
+        _prune_ai_cache(now)
+        cached = _ai_cache.get(key)
+        if cached is not None:
+            created_at, payload = cached
+            if now - created_at <= AI_CACHE_TTL_SECONDS:
+                return copy.deepcopy(payload), True
+
+    payload = ai_engine.generate_config(job_description)
+
+    with _ai_cache_lock:
+        _ai_cache[key] = (time.time(), copy.deepcopy(payload))
+        _prune_ai_cache()
+
+    return copy.deepcopy(payload), False
+
+
+def _render_cache_key(cv_config: dict, cl_content: dict, render_options: dict) -> str:
+    payload = {
+        "cv_config": cv_config,
+        "cl_content": cl_content,
+        "render_options": render_options,
+    }
+    serialized = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _prune_pdf_cache(now: float | None = None) -> None:
+    current = now if now is not None else time.time()
+    expired = [
+        key for key, (created_at, payload) in _pdf_cache.items()
+        if current - created_at > PDF_CACHE_TTL_SECONDS
+        or not (get_runtime_output_dir() / payload["cv_storage_name"]).exists()
+        or not (get_runtime_output_dir() / payload["letter_storage_name"]).exists()
+    ]
+    for key in expired:
+        _pdf_cache.pop(key, None)
+
+    while len(_pdf_cache) > PDF_CACHE_MAX_ENTRIES:
+        oldest_key = min(_pdf_cache, key=lambda item: _pdf_cache[item][0])
+        _pdf_cache.pop(oldest_key, None)
+
+
+def _get_cached_render(render_key: str) -> dict | None:
+    now = time.time()
+    with _pdf_cache_lock:
+        _prune_pdf_cache(now)
+        cached = _pdf_cache.get(render_key)
+        if cached is None:
+            return None
+        created_at, payload = cached
+        if now - created_at > PDF_CACHE_TTL_SECONDS:
+            _pdf_cache.pop(render_key, None)
+            return None
+        return dict(payload)
+
+
+def _store_cached_render(render_key: str, payload: dict) -> None:
+    with _pdf_cache_lock:
+        _pdf_cache[render_key] = (time.time(), dict(payload))
+        _prune_pdf_cache()
+
+
+def _await_future(future):
+    while True:
+        try:
+            return future.result(timeout=STREAM_HEARTBEAT_SECONDS)
+        except FutureTimeout:
+            yield _sse_comment()
+
+
+def _await_futures(futures: list) -> None:
+    pending = set(futures)
+    while pending:
+        done, pending = wait(pending, timeout=STREAM_HEARTBEAT_SECONDS)
+        if pending:
+            yield _sse_comment()
 
 
 def _friendly_error_message(error: Exception) -> str:
@@ -168,6 +346,8 @@ def _friendly_error_message(error: Exception) -> str:
         return "The server could not reach OpenAI."
     if "chrome pdf rendering is unavailable" in lowered or "fpdf2 is not installed" in lowered:
         return "PDF rendering is not configured correctly for this deployment."
+    if "chrome pdf rendering timed out" in lowered:
+        return "PDF rendering took too long on the server."
     if "chrome pdf error" in lowered:
         return "PDF rendering failed on the server."
 

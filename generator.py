@@ -6,13 +6,18 @@ import os
 import re
 import subprocess
 import tempfile
+import time
+from functools import lru_cache
 from pathlib import Path
 from string import Template
+from uuid import uuid4
 
 from pdf_fallback import build_cv_pdf_bytes
 
 PROJECT_DIR = Path(__file__).resolve().parent
 RUNTIME_OUTPUT_DIR = Path(tempfile.gettempdir()) / "dt_cv_generator"
+RUNTIME_OUTPUT_TTL_SECONDS = int(os.getenv("RUNTIME_OUTPUT_TTL_SECONDS", "21600"))
+CHROME_RENDER_TIMEOUT_SECONDS = int(os.getenv("CHROME_RENDER_TIMEOUT_SECONDS", "60"))
 
 CHROME_CANDIDATES = [
     os.getenv("CHROME_PATH"),
@@ -692,6 +697,37 @@ def get_runtime_output_dir() -> Path:
     return RUNTIME_OUTPUT_DIR
 
 
+@lru_cache(maxsize=8)
+def load_text_template(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
+
+
+def build_runtime_artifact_path(prefix: str, suffix: str) -> Path:
+    token = uuid4().hex[:12]
+    safe_prefix = slugify(prefix) or "artifact"
+    return get_runtime_output_dir() / f"{safe_prefix}_{token}{suffix}"
+
+
+def persist_runtime_pdf(download_name: str, pdf_bytes: bytes) -> Path:
+    stored_path = build_runtime_artifact_path(Path(download_name).stem, ".pdf")
+    stored_path.write_bytes(pdf_bytes)
+    return stored_path
+
+
+def prune_runtime_output_dir(max_age_seconds: int = RUNTIME_OUTPUT_TTL_SECONDS) -> None:
+    runtime_dir = get_runtime_output_dir()
+    cutoff = time.time() - max_age_seconds
+    for path in runtime_dir.iterdir():
+        if not path.is_file():
+            continue
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+        except FileNotFoundError:
+            continue
+
+
+@lru_cache(maxsize=1)
 def resolve_chrome_path() -> Path | None:
     for candidate in CHROME_CANDIDATES:
         if not candidate:
@@ -751,7 +787,17 @@ def _run_chrome_pdf(temp_html_path: Path, output_pdf_path: Path) -> None:
     ]
 
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=CHROME_RENDER_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(
+            f"Chrome PDF rendering timed out after {CHROME_RENDER_TIMEOUT_SECONDS} seconds."
+        ) from error
     except subprocess.CalledProcessError as error:
         if error.stderr:
             raise RuntimeError(f"Chrome PDF error: {error.stderr.strip()}") from error
@@ -764,12 +810,12 @@ def generate_cv_bytes(config: dict, options: dict | None = None) -> tuple[str, b
     chrome_error: RuntimeError | None = None
 
     if chrome_available():
-        template_text = get_cv_template_path(resolved).read_text(encoding="utf-8")
+        template_text = load_text_template(str(get_cv_template_path(resolved)))
         image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
         context = build_context(config, image_uri, resolved)
         html_output = render_html(template_text, context)
-        temp_html_path = PROJECT_DIR / f"_build_{slugify(config['filename_suffix'])}.html"
-        output_pdf_path = PROJECT_DIR / filename
+        temp_html_path = build_runtime_artifact_path(f"cv_html_{config['filename_suffix']}", ".html")
+        output_pdf_path = build_runtime_artifact_path(f"cv_pdf_{config['filename_suffix']}", ".pdf")
         temp_html_path.write_text(html_output, encoding="utf-8")
 
         try:

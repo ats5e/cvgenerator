@@ -931,8 +931,8 @@ def generate_config(job_description: str) -> tuple[dict, dict, list[str]]:
     """
     data = _call_llm(job_description)
 
-    company_name = data.get("company_name", "Company")
-    target_role = data.get("target_role", "Role")
+    company_name = str(data.get("company_name") or "").strip() or "Company"
+    target_role = str(data.get("target_role") or "").strip() or "Role"
 
     cv_config = {
         "company_name": company_name,

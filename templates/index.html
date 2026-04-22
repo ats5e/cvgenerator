@@ -1580,26 +1580,26 @@
 
         async function triggerDownload(payload) {
             try {
-                let blob;
                 if (payload.url) {
-                    const response = await fetch(payload.url);
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}`);
-                    }
-                    blob = await response.blob();
+                    const a = document.createElement("a");
+                    a.href = payload.url;
+                    a.download = payload.filename || "";
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
                 } else if (payload.base64) {
-                    blob = base64ToBlob(payload.base64);
+                    const blob = base64ToBlob(payload.base64);
+                    const blobUrl = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = blobUrl;
+                    a.download = payload.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
                 } else {
                     throw new Error("No document available.");
                 }
-                const blobUrl = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = blobUrl;
-                a.download = payload.filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
                 pushLog(`Downloaded ${payload.filename}`, "success");
             } catch (err) {
                 pushLog(`Download failed: ${err.message}`, "error");
@@ -1691,29 +1691,55 @@
             items.forEach((item) => {
                 const row = document.createElement("div");
                 row.className = "history-item";
-                const actionsHtml =
-                    item.cv_url && item.letter_url
-                        ? `
-                    <div class="history-actions">
-                        <a href="${item.cv_url}" download>CV</a>
-                        <a href="${item.letter_url}" download>Letter</a>
-                    </div>
-                `
-                        : `
-                    <div class="history-actions">
-                        <span class="history-note">Session download</span>
-                    </div>
-                `;
-                row.innerHTML = `
-                    <div class="history-left">
-                        <h4></h4>
-                        <p></p>
-                    </div>
-                    ${actionsHtml}
-                `;
-                row.querySelector("h4").textContent = `${item.company} | ${item.role}`;
-                row.querySelector("p").textContent =
-                    `${new Date(item.at).toLocaleString()} | ${buildOptionSummary(item.render_options, item.variant_label)} | ${item.recipient || "Auto addressee"}`;
+                const left = document.createElement("div");
+                left.className = "history-left";
+                const title = document.createElement("h4");
+                title.textContent = `${item.company} | ${item.role}`;
+                const meta = document.createElement("p");
+                const metaParts = [
+                    new Date(item.at).toLocaleString(),
+                    buildOptionSummary(item.render_options, item.variant_label),
+                    item.recipient || "Auto addressee",
+                ];
+                if (typeof item.total_seconds === "number") {
+                    metaParts.push(`${item.total_seconds.toFixed(1)}s total`);
+                }
+                if (item.cache_hit) {
+                    metaParts.push("AI cache");
+                }
+                if (item.pdf_cache_hit) {
+                    metaParts.push("PDF cache");
+                }
+                meta.textContent = metaParts.join(" | ");
+
+                left.appendChild(title);
+                left.appendChild(meta);
+                row.appendChild(left);
+
+                const actions = document.createElement("div");
+                actions.className = "history-actions";
+
+                if (item.cv_url && item.letter_url) {
+                    const cvLink = document.createElement("a");
+                    cvLink.href = item.cv_url;
+                    cvLink.download = item.cv_filename || "Tailored CV.pdf";
+                    cvLink.textContent = "CV";
+
+                    const letterLink = document.createElement("a");
+                    letterLink.href = item.letter_url;
+                    letterLink.download = item.letter_filename || "Cover Letter.pdf";
+                    letterLink.textContent = "Letter";
+
+                    actions.appendChild(cvLink);
+                    actions.appendChild(letterLink);
+                } else {
+                    const note = document.createElement("span");
+                    note.className = "history-note";
+                    note.textContent = "Session download";
+                    actions.appendChild(note);
+                }
+
+                row.appendChild(actions);
                 historyList.appendChild(row);
             });
         }
@@ -1733,6 +1759,7 @@
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
+            let sawTerminalEvent = false;
 
             while (true) {
                 const { value, done } = await reader.read();
@@ -1753,11 +1780,19 @@
 
                     const jsonStr = chunk.replace(/^data:\s*/, "");
                     try {
-                        handleEvent(JSON.parse(jsonStr));
+                        const event = JSON.parse(jsonStr);
+                        if (event.status === "done" || event.status === "error") {
+                            sawTerminalEvent = true;
+                        }
+                        handleEvent(event);
                     } catch {
                         console.warn("Bad SSE payload", jsonStr);
                     }
                 }
+            }
+
+            if (!sawTerminalEvent) {
+                throw new Error("Connection dropped before generation finished.");
             }
         }
 
@@ -1799,15 +1834,31 @@
 
             if (step === "done") {
                 pushLog(ev.message, "success");
+                if (typeof ev.total_seconds === "number") {
+                    const timingParts = [`Total ${ev.total_seconds.toFixed(1)}s`];
+                    if (typeof ev.ai_seconds === "number") {
+                        timingParts.push(`AI ${ev.ai_seconds.toFixed(1)}s`);
+                    }
+                    if (typeof ev.pdf_seconds === "number") {
+                        timingParts.push(`PDFs ${ev.pdf_seconds.toFixed(1)}s`);
+                    }
+                    if (ev.cache_hit) {
+                        timingParts.push("AI cache hit");
+                    }
+                    if (ev.pdf_cache_hit) {
+                        timingParts.push("PDF cache hit");
+                    }
+                    pushLog(timingParts.join(" | "), "success");
+                }
                 setStatus("Ready to download", "ok");
                 outRecipient.textContent = ev.recipient || outRecipient.textContent || "Dear Hiring Team,";
                 renderRenderOptions(ev.render_options);
                 const cvPayload = ev.cv_pdf_base64
                     ? { base64: ev.cv_pdf_base64, filename: ev.cv_filename || "Tailored CV.pdf" }
-                    : { url: ev.cv_url, filename: decodeURIComponent(ev.cv_url.split("/").pop()) };
+                    : { url: ev.cv_url, filename: ev.cv_filename || "Tailored CV.pdf" };
                 const letterPayload = ev.letter_pdf_base64
                     ? { base64: ev.letter_pdf_base64, filename: ev.letter_filename || "Cover Letter.pdf" }
-                    : { url: ev.letter_url, filename: decodeURIComponent(ev.letter_url.split("/").pop()) };
+                    : { url: ev.letter_url, filename: ev.letter_filename || "Cover Letter.pdf" };
                 setDownload(dlCv, "cv", cvPayload);
                 setDownload(dlLetter, "letter", letterPayload);
                 addToHistory({
@@ -1816,8 +1867,15 @@
                     recipient: ev.recipient,
                     variant_label: ev.variant_label,
                     render_options: ev.render_options,
+                    cv_filename: ev.cv_filename || "Tailored CV.pdf",
+                    letter_filename: ev.letter_filename || "Cover Letter.pdf",
                     cv_url: ev.cv_url || null,
                     letter_url: ev.letter_url || null,
+                    cache_hit: Boolean(ev.cache_hit),
+                    pdf_cache_hit: Boolean(ev.pdf_cache_hit),
+                    ai_seconds: typeof ev.ai_seconds === "number" ? ev.ai_seconds : null,
+                    pdf_seconds: typeof ev.pdf_seconds === "number" ? ev.pdf_seconds : null,
+                    total_seconds: typeof ev.total_seconds === "number" ? ev.total_seconds : null,
                     at: Date.now(),
                 });
                 return;

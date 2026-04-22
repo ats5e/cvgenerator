@@ -10,10 +10,12 @@ from generator import (
     PROJECT_DIR,
     ROLE_CONFIGS,
     build_contact_line,
+    build_runtime_artifact_path,
     build_header_image_html,
     build_render_variant_filename_suffix,
     escape,
     get_runtime_output_dir,
+    load_text_template,
     normalize_render_options,
     sanitize_filename_part,
     slugify,
@@ -257,7 +259,7 @@ def generate_cover_letter_bytes(config: dict, content: dict, options: dict | Non
     chrome_error: RuntimeError | None = None
 
     if chrome_available():
-        template_text = get_cover_letter_template_path(resolved).read_text(encoding="utf-8")
+        template_text = load_text_template(str(get_cover_letter_template_path(resolved)))
         image_uri = (PROJECT_DIR / "cropped_circle_image.png").resolve().as_uri()
         meta_items = [
             {"label": "Target Company", "value": config["company_name"]},
@@ -282,9 +284,14 @@ def generate_cover_letter_bytes(config: dict, content: dict, options: dict | Non
             "header_image_html": build_header_image_html(image_uri, resolved),
         }
         html_output = render_html(template_text, context)
-        temp_name = f"_build_cover_letter_{slugify(config['filename_suffix'])}.html"
-        temp_html_path = PROJECT_DIR / temp_name
-        output_pdf_path = PROJECT_DIR / filename
+        temp_html_path = build_runtime_artifact_path(
+            f"cover_letter_html_{config['filename_suffix']}",
+            ".html",
+        )
+        output_pdf_path = build_runtime_artifact_path(
+            f"cover_letter_pdf_{config['filename_suffix']}",
+            ".pdf",
+        )
         temp_html_path.write_text(html_output, encoding="utf-8")
         try:
             from generator import _run_chrome_pdf
