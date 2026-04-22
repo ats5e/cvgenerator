@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import hashlib
 import json
 import os
+from queue import Empty, Queue
 import sys
 import time
 from pathlib import Path
@@ -86,13 +87,17 @@ def generate():
         try:
             prune_runtime_output_dir()
             total_started_at = time.perf_counter()
+            ai_progress_queue: Queue = Queue()
 
             # Step 1 — AI analysis
             yield _sse({"status": "analysing", "message": "Analysing job description with AI…"})
             ai_started_at = time.perf_counter()
             with ThreadPoolExecutor(max_workers=1) as executor:
-                ai_future = executor.submit(_get_generation, job_description)
-                (cv_config, cl_content, keywords), cache_hit = yield from _await_future(ai_future)
+                ai_future = executor.submit(_get_generation, job_description, ai_progress_queue.put)
+                (cv_config, cl_content, keywords), cache_hit = yield from _await_future(
+                    ai_future,
+                    progress_queue=ai_progress_queue,
+                )
             ai_seconds = round(time.perf_counter() - ai_started_at, 2)
 
             if company_override:
@@ -251,7 +256,10 @@ def _prune_ai_cache(now: float | None = None) -> None:
         _ai_cache.pop(oldest_key, None)
 
 
-def _get_generation(job_description: str) -> tuple[tuple[dict, dict, list[str]], bool]:
+def _get_generation(
+    job_description: str,
+    progress_callback=None,
+) -> tuple[tuple[dict, dict, list[str]], bool]:
     key = _job_cache_key(job_description)
     now = time.time()
 
@@ -263,7 +271,7 @@ def _get_generation(job_description: str) -> tuple[tuple[dict, dict, list[str]],
             if now - created_at <= AI_CACHE_TTL_SECONDS:
                 return copy.deepcopy(payload), True
 
-    payload = ai_engine.generate_config(job_description)
+    payload = ai_engine.generate_config(job_description, progress_callback=progress_callback)
 
     with _ai_cache_lock:
         _ai_cache[key] = (time.time(), copy.deepcopy(payload))
@@ -318,12 +326,33 @@ def _store_cached_render(render_key: str, payload: dict) -> None:
         _prune_pdf_cache()
 
 
-def _await_future(future):
+def _drain_progress_events(progress_queue: Queue | None) -> list[str]:
+    if progress_queue is None:
+        return []
+    events = []
     while True:
         try:
-            return future.result(timeout=STREAM_HEARTBEAT_SECONDS)
+            payload = progress_queue.get_nowait()
+        except Empty:
+            break
+        events.append(_sse(payload))
+    return events
+
+
+def _await_future(future, progress_queue: Queue | None = None):
+    while True:
+        try:
+            result = future.result(timeout=STREAM_HEARTBEAT_SECONDS)
+            for event in _drain_progress_events(progress_queue):
+                yield event
+            return result
         except FutureTimeout:
-            yield _sse_comment()
+            events = _drain_progress_events(progress_queue)
+            if events:
+                for event in events:
+                    yield event
+            else:
+                yield _sse_comment()
 
 
 def _await_futures(futures: list) -> None:

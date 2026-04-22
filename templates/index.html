@@ -1457,9 +1457,9 @@
         const HISTORY_KEY = "dt_cv_history_v4";
         const PROGRESS_STEPS = {
             analysing: 20,
-            keywords: 46,
-            cv: 72,
-            letter: 90,
+            keywords: 66,
+            cv: 82,
+            letter: 92,
             done: 100,
         };
 
@@ -1798,7 +1798,9 @@
 
         function handleEvent(ev) {
             const step = ev.status;
-            if (PROGRESS_STEPS[step] !== undefined) {
+            if (typeof ev.progress === "number") {
+                setProgress(ev.progress);
+            } else if (PROGRESS_STEPS[step] !== undefined) {
                 setProgress(PROGRESS_STEPS[step]);
             }
 
@@ -1817,6 +1819,12 @@
                 renderRenderOptions(ev.render_options);
                 renderKeywords(ev.keywords);
                 setStatus("Tailoring", "busy");
+                return;
+            }
+
+            if (step === "ai_phase") {
+                pushLog(ev.message, "active");
+                setStatus("Analysing", "busy");
                 return;
             }
 

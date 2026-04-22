@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from typing import Callable
 
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -27,6 +28,7 @@ load_dotenv(override=True)
 _API_TIMEOUT = 90  # seconds for every OpenAI call
 _DEFAULT_OPENAI_MODEL = "gpt-5.4"
 _OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or _DEFAULT_OPENAI_MODEL).strip() or _DEFAULT_OPENAI_MODEL
+ProgressCallback = Callable[[dict], None]
 
 
 # ---------------------------------------------------------------------------
@@ -731,6 +733,22 @@ def _fix_cover_letter(
     return focus, paragraphs
 
 
+def _emit_progress(
+    progress_callback: ProgressCallback | None,
+    message: str,
+    phase: str,
+    progress: int,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback({
+        "status": "ai_phase",
+        "message": message,
+        "phase": phase,
+        "progress": progress,
+    })
+
+
 # ---------------------------------------------------------------------------
 # ── Phase execution functions ───────────────────────────────────────────────
 # ---------------------------------------------------------------------------
@@ -831,7 +849,7 @@ def _call_cover_letter(
 # ── Main orchestrator ───────────────────────────────────────────────────────
 # ---------------------------------------------------------------------------
 
-def _call_llm(job_description: str) -> dict:
+def _call_llm(job_description: str, progress_callback: ProgressCallback | None = None) -> dict:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY not set. Check your .env file.")
@@ -839,9 +857,11 @@ def _call_llm(job_description: str) -> dict:
     client = OpenAI(api_key=api_key)
 
     # ── Phase 1: Strategy brief ───────────────────────────────────────────
+    _emit_progress(progress_callback, "Building strategic positioning brief…", "strategy", 24)
     strategy_brief = _call_strategy(client, job_description)
 
     # ── Phase 2: CV execution ─────────────────────────────────────────────
+    _emit_progress(progress_callback, "Drafting tailored CV content…", "cv_draft", 34)
     cv_data = _call_cv(client, strategy_brief, job_description)
 
     company = cv_data.get("company_name", "Company")
@@ -851,6 +871,7 @@ def _call_llm(job_description: str) -> dict:
     skills = [str(s).strip() for s in cv_data.get("skills", []) if str(s).strip()]
     if skills and _skills_need_polish(skills):
         try:
+            _emit_progress(progress_callback, "Refining skills language…", "skills_fix", 40)
             cv_data["skills"] = _fix_skills(client, company, role, job_description, skills)
         except Exception:  # noqa: BLE001
             pass
@@ -859,6 +880,7 @@ def _call_llm(job_description: str) -> dict:
     keywords = [str(k).strip() for k in cv_data.get("ats_keywords", []) if str(k).strip()]
     if keywords and _keywords_need_polish(keywords):
         try:
+            _emit_progress(progress_callback, "Cleaning ATS keyword phrases…", "keyword_fix", 44)
             cv_data["ats_keywords"] = _fix_keywords(client, company, role, job_description, keywords)
         except Exception:  # noqa: BLE001
             pass
@@ -867,6 +889,7 @@ def _call_llm(job_description: str) -> dict:
     raw_overrides = cv_data.get("experience_overrides", {})
     if raw_overrides and _bullets_need_improvement(raw_overrides):
         try:
+            _emit_progress(progress_callback, "Tightening experience bullets…", "bullet_fix", 48)
             fixed = _fix_bullets(client, company, role, job_description, raw_overrides)
             if fixed:
                 cv_data["experience_overrides"] = fixed
@@ -874,6 +897,7 @@ def _call_llm(job_description: str) -> dict:
             pass
 
     # ── Phase 3: Cover letter execution ──────────────────────────────────
+    _emit_progress(progress_callback, "Drafting cover letter…", "cover_letter", 54)
     cl_data = _call_cover_letter(client, strategy_brief, job_description, cv_data)
 
     # Cover letter quality gates
@@ -884,6 +908,7 @@ def _call_llm(job_description: str) -> dict:
 
     if paragraphs and (needs_voice_fix or needs_phrase_fix):
         try:
+            _emit_progress(progress_callback, "Polishing cover letter language…", "cover_letter_fix", 60)
             new_focus, new_paras = _fix_cover_letter(
                 client, company, role, job_description, focus,
                 paragraphs, needs_voice_fix, needs_phrase_fix,
@@ -919,7 +944,10 @@ def _normalise_experience_overrides(raw: dict) -> dict:
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def generate_config(job_description: str) -> tuple[dict, dict, list[str]]:
+def generate_config(
+    job_description: str,
+    progress_callback: ProgressCallback | None = None,
+) -> tuple[dict, dict, list[str]]:
     """
     Main entry point for the AI engine.
 
@@ -929,7 +957,7 @@ def generate_config(job_description: str) -> tuple[dict, dict, list[str]]:
           - cover_letter_content (dict):   Keys: recipient, focus, paragraphs
           - ats_keywords (list[str]):       Keywords extracted from the JD
     """
-    data = _call_llm(job_description)
+    data = _call_llm(job_description, progress_callback=progress_callback)
 
     company_name = str(data.get("company_name") or "").strip() or "Company"
     target_role = str(data.get("target_role") or "").strip() or "Role"
