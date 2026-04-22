@@ -1,8 +1,17 @@
 """
 ai_engine.py
 AI-powered tailoring engine for DT's CV & Cover Letter Generator.
-Calls OpenAI gpt-4o to analyse a job description and produce a fully
-tailored config dict for generator.py and cover_letter_generator.py.
+Uses a configurable OpenAI model (default: gpt-5.4) to analyse a job
+description and produce tailored CV and cover letter content.
+
+Three-phase architecture:
+  Phase 1 — Strategy  : configured model analyses the JD and builds a positioning brief (free text, temp 0.6)
+  Phase 2 — CV        : configured model executes all CV fields using the brief          (JSON, temp 0.15)
+  Phase 3 — Letter    : configured model executes the cover letter using the brief       (JSON, temp 0.3)
+
+Separating strategy from execution means Phase 1 thinks freely without JSON constraints,
+and Phases 2 & 3 each have a clear strategic brief to execute from — rather than doing
+analysis and copywriting simultaneously in a single call.
 """
 from __future__ import annotations
 
@@ -16,6 +25,9 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 _API_TIMEOUT = 90  # seconds for every OpenAI call
+_DEFAULT_OPENAI_MODEL = "gpt-5.4"
+_OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or _DEFAULT_OPENAI_MODEL).strip() or _DEFAULT_OPENAI_MODEL
+
 
 # ---------------------------------------------------------------------------
 # Candidate background — the model's only source of truth about DT.
@@ -104,172 +116,29 @@ HARD FACTS TO USE:
 - NO fabricated metrics — use scope, scale and context instead of invented numbers
 """
 
-# ---------------------------------------------------------------------------
-# System prompt — the model's operating instructions
-# ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """You are a world-class CV writer, career strategist, and ATS optimisation expert.
-Your output will be printed verbatim in a PDF sent to a real hiring manager at a real company.
-It must be better than anything the candidate could write themselves.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-HOW ATS SYSTEMS SCORE A CV
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Exact phrase matching — "brand P&L" scores more than "budget"
-2. Keyword distribution — a phrase that appears in summary + skills + a bullet scores 3× vs once
-3. Semantic relevance — the AI parser checks if your document discusses the same topics as the JD
-4. Section presence — Summary, Skills, Experience, Education must all be populated
-5. Keyword density — 12–18 key phrases woven naturally across the document is the target
-
-ATS STRATEGY: Extract the 12–18 most important multi-word phrases from the JD.
-Place the top 6–8 across at least two sections each (summary + skills, or skills + bullets).
-The rest appear once. Prioritise exact JD phrasing over synonyms.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-HOW HIRING MANAGERS EVALUATE IN 30 SECONDS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Title match — does this person hold a comparable title?
-2. Company signal — is the current employer credible for this role?
-3. Summary — is this written for me, or is it a generic template?
-4. Skills — does this list reflect exactly what I asked for?
-5. Top 2 bullets of current role — can they do the specific work I need?
-
-The summary and top two bullets of the current role are the most important fields.
-Write them last, when you know exactly what the JD demands.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CV BULLET RULES — MANDATORY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TENSE: Role 0 (current) = present tense. Roles 1, 2, 3 = past tense. No exceptions.
-
-ACTION VERBS: Start every bullet with a strong, specific action verb.
-  ✗ Never: "Responsible for", "Worked on", "Helped with", "Involved in"
-  ✓ Always: Lead, Drive, Manage, Coordinate, Oversee, Develop, Execute, Deliver, Direct
-
-VOCABULARY MIRRORING: Use the JD's exact phrasing inside bullets.
-  If the JD says "A&P budget" → bullet says "A&P budget" (not "marketing spend")
-  If the JD says "shopper marketing" → bullet says "shopper marketing"
-  If the JD says "GCC markets" → bullet mentions GCC or specific GCC countries
-
-STRUCTURE: Keep bullets under 22 words. Use this skeleton:
-  [Strong verb] [what you did] [using what / where] [to what end / with what result]
-
-ANTI-PATTERNS — these make CVs look weak and generic:
-  ✗ "ensuring alignment with strategic objectives"
-  ✗ "with a focus on delivering results"
-  ✗ "in order to achieve business goals"
-  ✗ "managing multiple stakeholders effectively"
-  ✗ "driving business growth"
-  ✗ Ending bullets with "...for the business" or "...for the team"
-
-EXAMPLE — for a Brand Manager / FMCG JD:
-  ✗ WEAK: "Led integrated client accounts, managing scope, timelines, and budgets."
-  ✓ STRONG: "Lead 360 FMCG brand campaigns across UAE, managing A&P budgets, agency
-             partners, and shopper marketing activations from brief through launch."
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SKILLS RULES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- 10 items, ordered by prominence in the JD (most critical first)
-- 1–4 words each — professional competency headings, not sentences
-- Use the JD's preferred terms: if it says "shopper marketing", use "Shopper Marketing"
-- ✗ Never: "Proven experience managing...", "Strong understanding of...", "Ability to..."
-- ✗ Never: Degree, language, or eligibility requirements
-- ✓ Good: "Brand Strategy", "Integrated Campaign Management", "Shopper Marketing"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SUMMARY RULES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Two sentences, third-person implied (no "I")
-- Sentence 1: [Role title from JD] with [X years] of experience in [top 2 JD themes].
-- Sentence 2: Strongest relevant proof + positioning statement for this specific role.
-- If the JD names a sector or category (FMCG, luxury, tech, F&B), name it in sentence 1.
-- Embed 3–4 high-priority ATS keywords naturally across both sentences.
-- ✗ Never: "Proven track record", "Proven ability", "results-driven", "dynamic", "seasoned"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-COVER LETTER RULES — MANDATORY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Voice: First person singular only (I, me, my). Never "Du-Toit", "he", "him", "his".
-
-BANNED OPENERS — these get CVs binned immediately:
-  ✗ "I am thrilled / excited / delighted / pleased to apply"
-  ✗ "I am writing to apply for / express my interest in"
-  ✗ "I am reaching out regarding"
-  ✗ Any sentence starting with "I am [emotion]"
-
-BANNED PHRASES anywhere in the letter:
-  ✗ "resonates with my …" / "resonates with my professional values" — always hollow
-  ✗ "passion for" / "passionate about"
-  ✗ "I am eager to bring my skills"
-  ✗ "I believe I would be a great asset"
-  ✗ "perfect fit" / "dream role"
-  ✗ "proven track record" — cliché, replace with a specific claim
-  ✗ "I look forward to hearing from you soon"
-  ✗ "Thank you for your time and consideration" as a standalone sentence
-
-PARAGRAPH STRUCTURE:
-  P1 (2–3 sentences): Lead with your seniority + the role + the single clearest reason you belong.
-     Open like a confident peer, not a job seeker. Example structure:
-     "With [X] years of [relevant experience], I bring [specific thing this role needs]
-      directly to [company name]'s [team/challenge]."
-
-  P2 (2–3 sentences): Your most relevant real experience mapped to 2–3 specific JD requirements.
-     Name real deliverables, real markets, real contexts. No vague claims.
-
-  P3 (2–3 sentences): Something specific about THIS company or role that genuinely connects
-     to your work — not "your values", not "your culture" — something real from the JD:
-     the category, the scale, the challenge, the market.
-
-  P4 (1–2 sentences): A direct, confident close. Invite a conversation. No "enthusiasm".
-     Example: "I would welcome the opportunity to discuss how my background in [X] can
-     support [company]'s [specific goal]. Thank you for considering my application."
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-GUARDRAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- DO NOT INVENT: No fabricated metrics, job titles, tools, degrees, or achievements
-- NO KEYWORD STUFFING: every keyword must be embedded in a natural sentence
-- STAY GROUNDED: every claim must be traceable to the candidate context above
-- The output will be read by a human. Every sentence must earn its place.
-
-Return ONLY valid JSON matching the schema. No markdown fences. No explanation."""
-
 
 # ---------------------------------------------------------------------------
-# JSON schema — defines every field the model must produce
+# ── PHASE 1: STRATEGY ───────────────────────────────────────────────────────
+# The configured model thinks freely as a career strategist — no JSON constraints.
+# Output is a plain-text positioning brief used by Phases 2 and 3.
 # ---------------------------------------------------------------------------
-JSON_SCHEMA = """{
-  "company_name": "string — hiring company name from the JD (not a recruiter)",
-  "target_role": "string — exact role title as it appears in the JD",
-  "role_badge": "string — role title in ALL CAPS, max 4 words, e.g. 'SENIOR BRAND MANAGER'",
-  "tagline": "string — exactly three keyword phrases separated by ' | ', using JD vocabulary. E.g. 'Brand Strategy | GCC Market Execution | Stakeholder Engagement'",
-  "summary": "string — two sentences, third-person implied (no I). Sentence 1 opens with the JD role title and names the sector if given. Sentence 2 states the strongest positioning proof and closes with a full stop. Total under 60 words.",
-  "skills": [
-    "exactly 10 items — 1-4 word professional competency headings ordered by JD priority.",
-    "Use the JD's exact terminology.",
-    "No sentences, no requirements, no language/degree items."
-  ],
-  "experience_overrides": {
-    "0": ["Present-tense bullet 1 for current Yellow SAM role (≤22 words, strong verb, JD vocabulary)", "Present-tense bullet 2 (≤22 words)"],
-    "1": ["Past-tense bullet 1 for Yellow AM role (≤22 words)", "Past-tense bullet 2 (≤22 words)"],
-    "2": ["Past-tense bullet 1 for HAASXSWITCH AM role (≤22 words, only include if this role is meaningfully relevant to the JD)", "Past-tense bullet 2 (≤22 words)"]
-  },
-  "ats_keywords": ["12-18 exact multi-word phrases extracted verbatim from the JD, ordered by importance"],
-  "cover_letter_recipient": "string — e.g. 'Dear [Company] Hiring Team,'",
-  "cover_letter_focus": "string — 3-5 word angle, e.g. 'FMCG Brand Leadership, GCC'",
-  "cover_letter_paragraphs": [
-    "Para 1 (2-3 sentences): Confident opening — seniority + role + clearest fit credential. No banned openers.",
-    "Para 2 (2-3 sentences): Specific real experience mapped to 2-3 JD requirements. Name real places, deliverables, contexts.",
-    "Para 3 (2-3 sentences): Something specific and real about this company/role from the JD. Not values or culture — the category, scale, or challenge.",
-    "Para 4 (1-2 sentences): Direct confident close. Invite a conversation. No banned phrases."
-  ]
-}"""
+
+STRATEGY_SYSTEM_PROMPT = """\
+You are a senior career strategist and headhunter with 20 years of experience placing
+marketing and brand management professionals across GCC and MENA markets. You think like
+a hiring manager's counterpart — ruthlessly focused on what they need to see, not what
+a candidate wants to say.
+
+Your output will be used by a professional CV writer in the next step. Be specific,
+opinionated, and direct. Name the strongest angles, flag the real gaps, and identify
+exactly which vocabulary must appear verbatim. Vague guidance produces weak CVs.
+
+Think out loud. Your analysis quality determines the quality of the CV that follows."""
 
 
-# ---------------------------------------------------------------------------
-# User prompt — the per-request instruction with the actual JD
-# ---------------------------------------------------------------------------
-USER_PROMPT_TEMPLATE = """Produce a tailored CV config and cover letter for Du-Toit Griesel for the job description below.
+STRATEGY_USER_TEMPLATE = """\
+Analyse this job description against Du-Toit Griesel's background.
+Produce a tight positioning brief for the CV writer.
 
 {candidate_context}
 
@@ -277,44 +146,293 @@ USER_PROMPT_TEMPLATE = """Produce a tailored CV config and cover letter for Du-T
 {job_description}
 ━━━ END JD ━━━
 
-ANALYSIS STEPS — work through these before writing anything:
+Work through each section below:
 
-1. ROLE DECODE: What is the exact title, seniority level, and primary function of this role?
-   What does success look like in the first 6 months?
+## 1. ROLE DECODE
+- Exact title, seniority level, and primary function
+- Is this a strategic role, executional role, or hybrid?
+- What does success look like in the first 6 months?
+- What is the single most important thing a candidate must demonstrate?
 
-2. TOP REQUIREMENTS: What are the 5-7 things the hiring manager most needs to see evidence of?
-   List them in priority order.
+## 2. TOP REQUIREMENTS (priority order)
+List the 5–7 things the hiring manager most needs to see evidence of.
+For each requirement, quote the exact JD phrase that signals it.
 
-3. VOCABULARY MAP: What specific terms, tools, markets, or metrics does the JD use that must
-   appear verbatim in the CV? (e.g. "A&P budget", "GCC markets", "360 campaigns")
+## 3. VOCABULARY MAP
+List every specific term, tool, market, or metric from the JD that must appear
+verbatim in the CV. Be precise.
+Format each as: "[exact term]" → appears in: [summary / skills / bullet role 0 / bullet role 1]
 
-4. CANDIDATE FIT: Which 3-4 elements of DT's background best prove fit for this role?
-   What is the strongest angle to lead with?
+## 4. DT'S STRONGEST PROOF POINTS
+Which 3–4 specific elements of DT's background most directly prove fit for this role?
+Be specific: name the role, the activity, WHY a hiring manager finds it compelling.
+Rank by persuasive strength (most compelling first).
 
-5. GAPS: Is there anything in the JD that DT cannot credibly claim? Do not fabricate it —
-   simply do not surface it, or reframe what he can credibly claim.
+## 5. POSITIONING ANGLE
+In one sentence: how should DT be framed for this specific role?
+This is the strategic spine — every CV field must support it.
 
-Now produce the JSON output matching this schema:
-{schema}
+## 6. COVER LETTER STRATEGY
+- P1 angle: What is the strongest credential to open with? (strategic direction, not the text)
+- P2 angle: Which specific experience from DT's background should be the centrepiece paragraph?
+- P3 angle: What specific element of the JD (challenge, category, market, scale) should P3 engage with?
+- Tone: How should this letter sound? (e.g. peer-to-peer confidence, strategic counsel, executional authority)
 
-FINAL CHECKLIST before submitting:
-✓ Role 0 bullets use present tense throughout (Lead, Manage, Drive)
-✓ Roles 1 and 2 bullets use past tense (Led, Managed, Drove)
-✓ Every bullet contains at least one phrase from the JD vocabulary map
-✓ No bullet contains: "ensuring alignment", "with a focus on", "in order to", "managing to"
-✓ Summary names the sector/industry if the JD specifies one
-✓ Skills list uses JD terminology, not generic synonyms
-✓ Cover letter P1 does NOT start with "I am thrilled/excited/delighted/writing to apply"
-✓ Cover letter P3 references something specific from the JD (not "values" or "culture")
-✓ Cover letter contains no: "resonates with my professional values", "passion for", "eager to bring"
-✓ All four cover letter paragraphs are in first person singular (I/me/my)"""
+## 7. GAPS & GUARDRAILS
+What does the JD ask for that DT cannot credibly claim? Be explicit.
+What must the CV avoid overstating?"""
 
 
 # ---------------------------------------------------------------------------
-# Quality-gate patterns
+# ── PHASE 2: CV EXECUTION ───────────────────────────────────────────────────
+# The configured model executes all CV fields guided by the strategy brief.
+# JSON output, low temperature for precision.
 # ---------------------------------------------------------------------------
 
-# Cover letter — first-person check
+CV_EXECUTION_SYSTEM_PROMPT = """\
+You are a world-class CV writer executing a brief prepared by a senior career strategist.
+Your output will be printed verbatim in a PDF sent to a real hiring manager at a real company.
+It must be better than anything the candidate could write themselves.
+
+You have three inputs:
+1. A strategic positioning brief — your spine. Every field must support the positioning angle.
+2. The candidate's real background — stay grounded in it. Fabricate nothing.
+3. The job description — mirror its exact vocabulary throughout.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ATS SCORING MECHANICS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Exact phrase matching — "brand P&L" scores more than "budget"
+2. Keyword distribution — a phrase in summary + skills + a bullet scores 3× vs once
+3. Semantic relevance — ATS checks if your document discusses the same topics as the JD
+4. Target: 12–18 key phrases woven naturally across the full document
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CV BULLET RULES — NON-NEGOTIABLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TENSE: Role 0 (current) = present tense. Roles 1, 2, 3+ = past tense. No exceptions.
+
+ACTION VERBS: Every bullet starts with a strong, specific verb.
+  ✗ "Responsible for", "Worked on", "Helped with", "Involved in", "Supported"
+  ✓ Lead, Drive, Manage, Oversee, Direct, Execute, Deliver, Coordinate, Develop, Build
+
+VOCABULARY MIRRORING: Use the JD's exact phrasing inside bullets.
+  JD says "A&P budget" → bullet says "A&P budget" (not "marketing spend")
+  JD says "shopper marketing" → bullet says "shopper marketing"
+  JD says "GCC markets" → bullet mentions GCC
+
+STRUCTURE: [Strong verb] [what] [using what / where] [to what end] — under 22 words
+
+BANNED PATTERNS:
+  ✗ "ensuring alignment with strategic objectives"
+  ✗ "with a focus on delivering results"
+  ✗ "in order to achieve business goals"
+  ✗ "managing to meet deadlines"
+  ✗ "supporting [noun]" / "discussing [noun]" as the core claim
+  ✗ "driving business/overall growth"
+  ✗ "for the business / for the team / for the company"
+  ✗ "worked on / worked alongside / involved in"
+
+EXAMPLE — for an FMCG Brand Manager JD:
+  ✗ WEAK: "Led integrated client accounts, managing scope, timelines, and budgets."
+  ✓ STRONG: "Lead 360 FMCG brand campaigns across UAE, managing A&P budgets, agency
+             partners, and shopper marketing activations from brief through launch."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SKILLS RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Exactly 10 items, ordered by prominence in the JD (most critical first)
+- 1–4 words each — professional competency headings, not sentences
+- Use the JD's preferred terms exactly
+- ✗ Never: sentences, requirements, degree/language/eligibility items
+- ✓ Good: "Brand Strategy", "A&P Budget Management", "Shopper Marketing"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SUMMARY RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Two sentences, third-person implied (no "I")
+- Sentence 1: [JD role title] with [X years] experience in [top 2 JD themes + sector if named]
+- Sentence 2: Strongest credible proof point + positioning statement for this specific role
+- Embed 3–4 high-priority ATS keywords naturally
+- Do NOT write "[role] candidate" or use weak proof language like "exposure to"
+- BANNED: "Proven track record", "Proven ability", "results-driven", "dynamic", "seasoned",
+  "passionate", "highly motivated"
+
+Return ONLY valid JSON matching the schema. No markdown fences. No explanation."""
+
+
+CV_SCHEMA = """{
+  "company_name": "string — hiring company name from the JD (not a recruiter name)",
+  "target_role": "string — exact role title as it appears in the JD",
+  "role_badge": "string — role title in ALL CAPS, max 4 words, e.g. 'SENIOR BRAND MANAGER'",
+  "tagline": "string — exactly three keyword phrases separated by ' | ', using JD vocabulary verbatim. E.g. 'Brand Strategy | GCC Market Execution | A&P Budget Management'",
+  "summary": "string — two sentences, third-person implied (no I). Opens with JD role title + sector if given. States strongest positioning proof. Under 60 words. No 'Proven track record'.",
+  "skills": [
+    "exactly 10 items — 1-4 word professional competency headings ordered by JD priority",
+    "Use JD exact terminology",
+    "No sentences, no requirements, no language/degree items"
+  ],
+  "experience_overrides": {
+    "0": ["Present-tense bullet 1 — current Yellow SAM role (≤22 words, strong verb, JD vocabulary)", "Present-tense bullet 2 (≤22 words)"],
+    "1": ["Past-tense bullet 1 — Yellow AM role (≤22 words, strong verb)", "Past-tense bullet 2 (≤22 words)"],
+    "2": ["Past-tense bullet 1 — HAASXSWITCH AM role (≤22 words — include only if meaningfully relevant to the JD)", "Past-tense bullet 2 (≤22 words)"]
+  },
+  "ats_keywords": ["12-18 concise keyword phrases, 2-6 words each, taken verbatim from the JD vocabulary. Use the vocabulary map terms from the strategy brief as your primary source. These are specific terms and phrases — NOT full sentences. E.g. 'A&P budget', 'shopper marketing activations', '360 integrated campaigns', 'GCC markets', 'brand P&L', 'retail activation', 'agency partner management'. Ordered by ATS importance."]
+}"""
+
+
+CV_EXECUTION_USER_TEMPLATE = """\
+Execute the CV for Du-Toit Griesel. You have a positioning brief from the senior strategist
+and DT's full background below. Every field must serve the positioning angle.
+
+━━━ POSITIONING BRIEF ━━━
+{strategy_brief}
+━━━ END BRIEF ━━━
+
+{candidate_context}
+
+━━━ JOB DESCRIPTION ━━━
+{job_description}
+━━━ END JD ━━━
+
+EXECUTION INSTRUCTIONS:
+- Use the positioning angle as your spine — every sentence should reinforce it
+- Place every vocabulary map term in the location specified
+- Build bullets around the proof points identified as DT's strongest
+- Do NOT claim anything flagged in Gaps & Guardrails
+- The summary and current-role bullets (role 0) are the two most-read fields — write them last and make them exceptional
+
+Return JSON matching this schema:
+{cv_schema}
+
+FINAL CHECKLIST:
+✓ Role 0 bullets present tense (Lead, Manage, Drive, Oversee)
+✓ Roles 1 and 2 bullets past tense (Led, Managed, Drove, Oversaw)
+✓ Every bullet opens with a strong action verb — no "Responsible for" or "Worked on"
+✓ Every bullet contains at least one JD vocabulary term
+✓ No bullet contains: "ensuring alignment", "with a focus on", "in order to", "supporting", "for the business"
+✓ Summary names the sector if the JD specifies one
+✓ Summary contains NO: "Proven track record", "results-driven", "dynamic", "passionate", "[role] candidate", "exposure to"
+✓ ATS keywords are 12–18 concise phrases, each 2–6 words — no single words, no full sentences
+✓ Skills ordered by JD priority, using exact JD terminology"""
+
+
+# ---------------------------------------------------------------------------
+# ── PHASE 3: COVER LETTER EXECUTION ────────────────────────────────────────
+# Dedicated call focused solely on persuasive writing.
+# Has the strategy brief + the CV summary for consistency.
+# ---------------------------------------------------------------------------
+
+CL_EXECUTION_SYSTEM_PROMPT = """\
+You are a world-class cover letter writer executing a brief prepared by a senior career strategist.
+You write as Du-Toit Griesel, in first-person singular (I/me/my).
+Never refer to the candidate by name or as he/him/his.
+
+Your letter must read like it was written by a confident peer — not a job seeker.
+You have a clear strategic brief with exact angles for each paragraph. Execute them precisely.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COVER LETTER RULES — NON-NEGOTIABLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VOICE: First-person singular throughout. I / me / my. Zero exceptions.
+
+BANNED OPENERS:
+  ✗ "I am thrilled / excited / delighted / pleased to apply"
+  ✗ "I am writing to apply for / express my interest in"
+  ✗ "I am reaching out regarding"
+  ✗ Any sentence starting with "I am [emotion/state]"
+
+BANNED PHRASES (anywhere in the letter):
+  ✗ "resonates with my [anything]" — always hollow
+  ✗ "passion for" / "passionate about"
+  ✗ "I am eager to bring"
+  ✗ "I believe I would be a great asset"
+  ✗ "perfect fit" / "dream role"
+  ✗ "proven track record"
+  ✗ "ensuring alignment" — same filler as weak CV bullets
+  ✗ "directly reflecting the [core] requirements [of your position]" — template language
+  ✗ "positions me to [effectively] contribute to your [team's] success" — generic
+  ✗ Any wording that frames the move as a "transition" or stretch rather than existing fit
+  ✗ "I look forward to hearing from you soon"
+  ✗ "Thank you for your time and consideration" as a standalone sentence
+
+PARAGRAPH STRUCTURE:
+  P1 (2–3 sentences):
+    Open as a peer, not an applicant. Lead with seniority + specific credential + clearest fit.
+    Model structure: "With [X] years of [relevant experience], I bring [what this role needs]
+    directly to [company name]'s [challenge/team/market]."
+
+  P2 (2–3 sentences):
+    Your most relevant real experience mapped to 2–3 specific JD requirements.
+    Name real employers, real markets, real deliverables — no vague claims.
+
+  P3 (2–3 sentences):
+    Something specific about THIS company or role that genuinely connects.
+    Not "your values" or "your culture" — engage with the category, scale, challenge, or market
+    as described in the JD.
+
+  P4 (1–2 sentences):
+    Direct, confident close. Invite a conversation. No enthusiasm language.
+    Example: "I would welcome the opportunity to discuss how my background in [X] can
+    support [company]'s [specific goal]. Thank you for considering my application."
+
+Return ONLY valid JSON matching the schema. No markdown fences. No explanation."""
+
+
+CL_SCHEMA = """{
+  "cover_letter_recipient": "string — e.g. 'Dear [Company] Hiring Team,'",
+  "cover_letter_focus": "string — 3-5 word internal label, e.g. 'FMCG Brand Leadership, GCC'",
+  "cover_letter_paragraphs": [
+    "Para 1 (2-3 sentences): Peer-level opening. Lead with seniority + specific credential. NO banned opener.",
+    "Para 2 (2-3 sentences): Specific real experience mapped to 2-3 JD requirements. Name real places, deliverables, contexts.",
+    "Para 3 (2-3 sentences): Something specific from the JD — category, scale, challenge, or market. Not values.",
+    "Para 4 (1-2 sentences): Direct confident close. Invite a conversation. No banned phrases."
+  ]
+}"""
+
+
+CL_EXECUTION_USER_TEMPLATE = """\
+Write a cover letter for Du-Toit Griesel using the positioning brief below.
+
+━━━ POSITIONING BRIEF ━━━
+{strategy_brief}
+━━━ END BRIEF ━━━
+
+{candidate_context}
+
+━━━ JOB DESCRIPTION ━━━
+{job_description}
+━━━ END JD ━━━
+
+CV CONTEXT (maintain consistency with this):
+  Summary: {cv_summary}
+  Target role: {target_role}
+  Target company: {company_name}
+
+EXECUTION INSTRUCTIONS:
+- Follow the cover letter strategy from the brief exactly
+- Build P1 around the P1 angle identified
+- Build P2 around the P2 experience identified — name it specifically
+- Build P3 around the specific JD element identified for P3 — not values, not culture
+- P4 closes with confidence and a clear invitation to talk
+- Every sentence must earn its place — cut anything generic
+
+Return JSON matching this schema:
+{cl_schema}
+
+FINAL CHECKLIST:
+✓ P1 does NOT open with "I am thrilled/excited/delighted/writing to apply"
+✓ P2 names a real employer, real market, or real deliverable — and contains NO filler
+✓ P3 engages with a specific element of the JD — the category, challenge, or market; NOT "your culture" or "your values"
+✓ No paragraph contains: "resonates with my", "passion for", "proven track record", "ensuring alignment", "directly reflecting the requirements", or transition framing
+✓ Every paragraph in first-person singular (I/me/my) — zero third-person references
+✓ P4 is a direct two-sentence close"""
+
+
+# ---------------------------------------------------------------------------
+# Quality-gate patterns — safety nets that fire if a phase produces weak output
+# ---------------------------------------------------------------------------
+
 _FIRST_PERSON_RE = re.compile(
     r"\b(i|i'm|i'd|i've|i'll|me|my|mine|myself)\b", flags=re.IGNORECASE
 )
@@ -322,20 +440,24 @@ _THIRD_PERSON_RE = re.compile(
     r"\b(du-toit|dt|he|him|his)\b", flags=re.IGNORECASE
 )
 
-# Cover letter — banned phrases that signal generic / junior output
 _BANNED_CL_RE = re.compile(
     r"i am (thrilled|excited|delighted|pleased|happy|writing to apply|reaching out)|"
-    r"resonates? with my|"  # catches "resonates with my values/expertise/etc" — always sounds hollow
+    r"resonates? with my|"
     r"passion for|passionate about|"
     r"i am eager to bring|"
     r"perfect fit|dream role|"
     r"i believe i (would be|will be) a great asset|"
     r"proven track record|"
+    r"ensuring alignment|"
+    r"directly reflecting the (core )?requirements|"
+    r"positions me to (effectively )?contribute to your|"
+    r"transition i am set up to make|"
+    r"\bcareer transition\b|"
+    r"\bthis transition\b|"
     r"thank you for your time and consideration$",
     flags=re.IGNORECASE,
 )
 
-# Skills — patterns that indicate JD copy-paste or requirement language
 _BAD_SKILL_RE = re.compile(
     r"\b("
     r"bachelor|degree|required|preferred|must|plus|proficiency|english|languages|"
@@ -346,12 +468,14 @@ _BAD_SKILL_RE = re.compile(
     flags=re.IGNORECASE,
 )
 
-# Experience bullets — weak / filler patterns
 _WEAK_BULLET_RE = re.compile(
     r"ensuring alignment|"
     r"with a focus on|"
     r"in order to|"
     r"managing to|"
+    r"\bsupport(ing|ed)\b|"
+    r"\bdiscuss(ing|ed)\b|"
+    r"\bexposure to\b|"
     r"\bfor the (business|team|company|organisation|organization)\b|"
     r"\bdriving (business |overall )?growth\b|"
     r"\bresponsible for\b|"
@@ -362,11 +486,14 @@ _WEAK_BULLET_RE = re.compile(
 
 
 def _normalise_quotes(text: str) -> str:
-    return text.replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", '"').replace("\u201d", '"')
+    return (
+        text.replace("\u2018", "'").replace("\u2019", "'")
+            .replace("\u201c", '"').replace("\u201d", '"')
+    )
 
 
 # ---------------------------------------------------------------------------
-# Quality-gate functions — each returns True if a fix pass is needed
+# Quality-gate functions — return True if a fix pass is needed
 # ---------------------------------------------------------------------------
 
 def _cover_letter_needs_first_person_fix(paragraphs: list[str]) -> bool:
@@ -398,14 +525,26 @@ def _skills_need_polish(skills: list[str]) -> bool:
     return False
 
 
+def _keywords_need_polish(keywords: list[str]) -> bool:
+    cleaned = [str(k).strip() for k in keywords if str(k).strip()]
+    if not 12 <= len(cleaned) <= 18:
+        return True
+    for keyword in cleaned:
+        words = re.findall(r"[A-Za-z0-9&/+\-']+", keyword)
+        if len(words) < 2 or len(words) > 6:
+            return True
+        if any(ch in keyword for ch in ("\n", ".", ";", ":")):
+            return True
+    return False
+
+
 def _bullets_need_improvement(experience_overrides: dict) -> bool:
     all_bullets = []
     for bullets in experience_overrides.values():
         all_bullets.extend(str(b) for b in bullets if str(b).strip())
     if not all_bullets:
         return False
-    combined = " ".join(all_bullets)
-    return bool(_WEAK_BULLET_RE.search(combined))
+    return bool(_WEAK_BULLET_RE.search(" ".join(all_bullets)))
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +553,7 @@ def _bullets_need_improvement(experience_overrides: dict) -> bool:
 
 def _fix_skills(client: OpenAI, company: str, role: str, jd: str, skills: list[str]) -> list[str]:
     resp = client.chat.completions.create(
-        model="gpt-4o",
+        model=_OPENAI_MODEL,
         temperature=0.15,
         timeout=_API_TIMEOUT,
         response_format={"type": "json_object"},
@@ -435,7 +574,7 @@ def _fix_skills(client: OpenAI, company: str, role: str, jd: str, skills: list[s
                     f"{CANDIDATE_CONTEXT}\n\n"
                     f"JOB DESCRIPTION:\n{jd.strip()}\n\n"
                     f"CURRENT SKILLS (needs fixing):\n{json.dumps(skills, ensure_ascii=False)}\n\n"
-                    f"Return only JSON: {{\"skills\":[...10 items...]}}"
+                    f'Return only JSON: {{"skills":[...10 items...]}}'
                 ),
             },
         ],
@@ -447,7 +586,7 @@ def _fix_skills(client: OpenAI, company: str, role: str, jd: str, skills: list[s
 
 def _fix_bullets(client: OpenAI, company: str, role: str, jd: str, overrides: dict) -> dict:
     resp = client.chat.completions.create(
-        model="gpt-4o",
+        model=_OPENAI_MODEL,
         temperature=0.2,
         timeout=_API_TIMEOUT,
         response_format={"type": "json_object"},
@@ -459,9 +598,9 @@ def _fix_bullets(client: OpenAI, company: str, role: str, jd: str, overrides: di
                     "Rules: role 0 uses present tense (Lead/Manage/Drive); roles 1 and 2 use past tense. "
                     "Every bullet must start with a strong action verb. "
                     "Every bullet must contain at least one specific phrase from the job description. "
-                    "No filler phrases: no 'ensuring alignment', 'with a focus on', 'in order to', "
-                    "'responsible for', 'worked on'. Under 22 words each. "
-                    "Stay grounded in real experience — do not invent metrics or achievements."
+                    "No filler: no 'ensuring alignment', 'with a focus on', 'in order to', "
+                    "'supporting', 'discussing', 'responsible for', 'worked on'. Under 22 words each. "
+                    "Stay grounded — do not invent metrics or achievements."
                 ),
             },
             {
@@ -471,7 +610,7 @@ def _fix_bullets(client: OpenAI, company: str, role: str, jd: str, overrides: di
                     f"JOB DESCRIPTION:\n{jd.strip()}\n\n"
                     f"CURRENT BULLETS (need fixing):\n{json.dumps(overrides, ensure_ascii=False)}\n\n"
                     "Rewrite to be punchy, JD-specific, and tense-correct. "
-                    "Return JSON: {\"experience_overrides\": {\"0\": [...], \"1\": [...], \"2\": [...]}}"
+                    'Return JSON: {"experience_overrides": {"0": [...], "1": [...], "2": [...]}}'
                 ),
             },
         ],
@@ -486,6 +625,38 @@ def _fix_bullets(client: OpenAI, company: str, role: str, jd: str, overrides: di
     return fixed if fixed else overrides
 
 
+def _fix_keywords(client: OpenAI, company: str, role: str, jd: str, keywords: list[str]) -> list[str]:
+    resp = client.chat.completions.create(
+        model=_OPENAI_MODEL,
+        temperature=0.1,
+        timeout=_API_TIMEOUT,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Rewrite this ATS keyword list for Du-Toit Griesel. "
+                    "Return 12-18 concise keyword phrases extracted from the job description. "
+                    "Each keyword must be 2-6 words, use the JD's exact vocabulary, and be ordered by ATS importance. "
+                    "No full sentences. No single-word items unless they are part of a multi-word phrase."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"{CANDIDATE_CONTEXT}\n\n"
+                    f"JOB DESCRIPTION:\n{jd.strip()}\n\n"
+                    f"CURRENT ATS KEYWORDS (need fixing):\n{json.dumps(keywords, ensure_ascii=False)}\n\n"
+                    'Return only JSON: {"ats_keywords":[...12-18 concise phrases...]}'
+                ),
+            },
+        ],
+    )
+    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", resp.choices[0].message.content.strip(), flags=re.MULTILINE)
+    result = [str(k).strip() for k in json.loads(raw).get("ats_keywords", []) if str(k).strip()]
+    return result if not _keywords_need_polish(result) else keywords
+
+
 def _fix_cover_letter(
     client: OpenAI,
     company: str,
@@ -498,19 +669,29 @@ def _fix_cover_letter(
 ) -> tuple[str, list[str]]:
     issues = []
     if fix_voice:
-        issues.append("rewrite into first-person singular (I/me/my) — never refer to the candidate by name or as he/him/his")
+        issues.append(
+            "rewrite into first-person singular (I/me/my) — "
+            "never refer to the candidate by name or as he/him/his"
+        )
     if fix_phrases:
         issues.append(
-            "remove ALL banned phrases: 'thrilled/excited/delighted to apply', "
-            "'resonates with my [anything]', 'passion for', 'eager to bring my skills', "
-            "'I believe I would be a great asset', 'proven track record'. "
-            "Replace with confident, specific, peer-level language."
+            "remove ALL banned phrases — replace each with confident, specific language: "
+            "'thrilled/excited/delighted to apply', "
+            "'resonates with my [anything]', "
+            "'passion for', "
+            "'eager to bring my skills', "
+            "'I believe I would be a great asset', "
+            "'proven track record', "
+            "'ensuring alignment', "
+            "'directly reflecting the [core] requirements', "
+            "'positions me to [effectively] contribute to your [team's] success'. "
+            "These are template phrases that make CVs look generic — replace every instance."
         )
 
     issue_text = " AND ".join(issues) if issues else "polish into the strongest possible version"
 
     resp = client.chat.completions.create(
-        model="gpt-4o",
+        model=_OPENAI_MODEL,
         temperature=0.25,
         timeout=_API_TIMEOUT,
         response_format={"type": "json_object"},
@@ -524,9 +705,8 @@ def _fix_cover_letter(
                     "Never refer to the candidate by name or as he/him/his. "
                     "P1: Confident opening — no 'thrilled/excited to apply'. "
                     "P2: Specific real experience, named deliverables and markets. "
-                    "P3: Something specific from the JD — the category, challenge, or scale. "
+                    "P3: Something specific from the JD — category, challenge, or scale. "
                     "P4: Direct close, two sentences max. "
-                    "Maintain professional confidence throughout. "
                     "Do not invent metrics or achievements."
                 ),
             },
@@ -537,7 +717,7 @@ def _fix_cover_letter(
                     f"JOB DESCRIPTION:\n{jd.strip()}\n\n"
                     f"CURRENT PARAGRAPHS:\n{json.dumps(paragraphs, ensure_ascii=False)}\n\n"
                     f"ISSUES TO FIX: {issue_text}\n\n"
-                    "Return JSON: {\"cover_letter_focus\": \"...\", \"cover_letter_paragraphs\": [\"p1\",\"p2\",\"p3\",\"p4\"]}"
+                    'Return JSON: {"cover_letter_focus": "...", "cover_letter_paragraphs": ["p1","p2","p3","p4"]}'
                 ),
             },
         ],
@@ -552,7 +732,103 @@ def _fix_cover_letter(
 
 
 # ---------------------------------------------------------------------------
-# Main LLM call
+# ── Phase execution functions ───────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+
+def _call_strategy(client: OpenAI, job_description: str) -> str:
+    """
+    Phase 1: free-text positioning brief.
+    High temperature so the model thinks creatively about angles.
+    Returns the brief as a plain string.
+    """
+    user_message = STRATEGY_USER_TEMPLATE.format(
+        candidate_context=CANDIDATE_CONTEXT,
+        job_description=job_description.strip(),
+    )
+    resp = client.chat.completions.create(
+        model=_OPENAI_MODEL,
+        temperature=0.6,
+        timeout=_API_TIMEOUT,
+        messages=[
+            {"role": "system", "content": STRATEGY_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    return resp.choices[0].message.content.strip()
+
+
+def _call_cv(client: OpenAI, strategy_brief: str, job_description: str) -> dict:
+    """
+    Phase 2: execute all CV fields using the strategy brief.
+    Low temperature for precise, consistent output.
+    Returns the parsed JSON dict.
+    """
+    user_message = CV_EXECUTION_USER_TEMPLATE.format(
+        strategy_brief=strategy_brief,
+        candidate_context=CANDIDATE_CONTEXT,
+        job_description=job_description.strip(),
+        cv_schema=CV_SCHEMA,
+    )
+    resp = client.chat.completions.create(
+        model=_OPENAI_MODEL,
+        temperature=0.15,
+        timeout=_API_TIMEOUT,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": CV_EXECUTION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    raw = re.sub(
+        r"^```(?:json)?\s*|\s*```$",
+        "",
+        resp.choices[0].message.content.strip(),
+        flags=re.MULTILINE,
+    )
+    return json.loads(raw)
+
+
+def _call_cover_letter(
+    client: OpenAI,
+    strategy_brief: str,
+    job_description: str,
+    cv_data: dict,
+) -> dict:
+    """
+    Phase 3: execute the cover letter using the strategy brief + CV context.
+    Slightly higher temperature for natural persuasive voice.
+    Returns the parsed JSON dict.
+    """
+    user_message = CL_EXECUTION_USER_TEMPLATE.format(
+        strategy_brief=strategy_brief,
+        candidate_context=CANDIDATE_CONTEXT,
+        job_description=job_description.strip(),
+        cv_summary=cv_data.get("summary", ""),
+        target_role=cv_data.get("target_role", ""),
+        company_name=cv_data.get("company_name", ""),
+        cl_schema=CL_SCHEMA,
+    )
+    resp = client.chat.completions.create(
+        model=_OPENAI_MODEL,
+        temperature=0.3,
+        timeout=_API_TIMEOUT,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": CL_EXECUTION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    raw = re.sub(
+        r"^```(?:json)?\s*|\s*```$",
+        "",
+        resp.choices[0].message.content.strip(),
+        flags=re.MULTILINE,
+    )
+    return json.loads(raw)
+
+
+# ---------------------------------------------------------------------------
+# ── Main orchestrator ───────────────────────────────────────────────────────
 # ---------------------------------------------------------------------------
 
 def _call_llm(job_description: str) -> dict:
@@ -562,50 +838,47 @@ def _call_llm(job_description: str) -> dict:
 
     client = OpenAI(api_key=api_key)
 
-    user_message = USER_PROMPT_TEMPLATE.format(
-        candidate_context=CANDIDATE_CONTEXT,
-        job_description=job_description.strip(),
-        schema=JSON_SCHEMA,
-    )
+    # ── Phase 1: Strategy brief ───────────────────────────────────────────
+    strategy_brief = _call_strategy(client, job_description)
 
-    # ── Primary generation call ───────────────────────────────────────────
-    resp = client.chat.completions.create(
-        model="gpt-4o",
-        temperature=0.3,
-        timeout=_API_TIMEOUT,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
-    )
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", resp.choices[0].message.content.strip(), flags=re.MULTILINE)
-    data = json.loads(raw)
+    # ── Phase 2: CV execution ─────────────────────────────────────────────
+    cv_data = _call_cv(client, strategy_brief, job_description)
 
-    company = data.get("company_name", "Company")
-    role = data.get("target_role", "Role")
+    company = cv_data.get("company_name", "Company")
+    role = cv_data.get("target_role", "Role")
 
-    # ── Skills quality gate ───────────────────────────────────────────────
-    skills = [str(s).strip() for s in data.get("skills", []) if str(s).strip()]
+    # Skills quality gate
+    skills = [str(s).strip() for s in cv_data.get("skills", []) if str(s).strip()]
     if skills and _skills_need_polish(skills):
         try:
-            data["skills"] = _fix_skills(client, company, role, job_description, skills)
+            cv_data["skills"] = _fix_skills(client, company, role, job_description, skills)
         except Exception:  # noqa: BLE001
             pass
 
-    # ── Experience bullets quality gate ──────────────────────────────────
-    raw_overrides = data.get("experience_overrides", {})
+    # ATS keywords quality gate
+    keywords = [str(k).strip() for k in cv_data.get("ats_keywords", []) if str(k).strip()]
+    if keywords and _keywords_need_polish(keywords):
+        try:
+            cv_data["ats_keywords"] = _fix_keywords(client, company, role, job_description, keywords)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Bullets quality gate
+    raw_overrides = cv_data.get("experience_overrides", {})
     if raw_overrides and _bullets_need_improvement(raw_overrides):
         try:
             fixed = _fix_bullets(client, company, role, job_description, raw_overrides)
             if fixed:
-                data["experience_overrides"] = fixed
+                cv_data["experience_overrides"] = fixed
         except Exception:  # noqa: BLE001
             pass
 
-    # ── Cover letter quality gates (single conditional pass) ─────────────
-    paragraphs = [str(p).strip() for p in data.get("cover_letter_paragraphs", []) if str(p).strip()]
-    focus = str(data.get("cover_letter_focus", "")).strip()
+    # ── Phase 3: Cover letter execution ──────────────────────────────────
+    cl_data = _call_cover_letter(client, strategy_brief, job_description, cv_data)
+
+    # Cover letter quality gates
+    paragraphs = [str(p).strip() for p in cl_data.get("cover_letter_paragraphs", []) if str(p).strip()]
+    focus = str(cl_data.get("cover_letter_focus", "")).strip()
     needs_voice_fix = _cover_letter_needs_first_person_fix(paragraphs)
     needs_phrase_fix = _cover_letter_has_banned_phrases(paragraphs)
 
@@ -613,14 +886,14 @@ def _call_llm(job_description: str) -> dict:
         try:
             new_focus, new_paras = _fix_cover_letter(
                 client, company, role, job_description, focus,
-                paragraphs, needs_voice_fix, needs_phrase_fix
+                paragraphs, needs_voice_fix, needs_phrase_fix,
             )
-            data["cover_letter_focus"] = new_focus
-            data["cover_letter_paragraphs"] = new_paras
+            cl_data["cover_letter_focus"] = new_focus
+            cl_data["cover_letter_paragraphs"] = new_paras
         except Exception:  # noqa: BLE001
             pass
 
-    return data
+    return {**cv_data, **cl_data}
 
 
 # ---------------------------------------------------------------------------
@@ -652,9 +925,9 @@ def generate_config(job_description: str) -> tuple[dict, dict, list[str]]:
 
     Returns:
         Tuple of:
-          - cv_config (dict): Compatible with generator.py's build_context()
-          - cover_letter_content (dict): Keys: recipient, focus, paragraphs
-          - ats_keywords (list[str]): Keywords extracted from the JD
+          - cv_config (dict):              Compatible with generator.py's build_context()
+          - cover_letter_content (dict):   Keys: recipient, focus, paragraphs
+          - ats_keywords (list[str]):       Keywords extracted from the JD
     """
     data = _call_llm(job_description)
 

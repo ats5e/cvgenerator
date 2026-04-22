@@ -4,7 +4,7 @@ A local web app that turns any job description into a tailored, ATS-optimised CV
 
 - **Frontend**: dark single-page dashboard at `http://localhost:5050`
 - **Backend**: Flask + server-sent events
-- **AI**: OpenAI `gpt-4o` in JSON mode — extracts ATS keywords, rewrites the summary, skills, experience bullets and cover letter paragraphs to mirror the JD
+- **AI**: OpenAI `gpt-5.4` by default, configurable via `OPENAI_MODEL` — extracts ATS keywords, rewrites the summary, skills, experience bullets and cover letter paragraphs to mirror the JD
 - **Rendering**: headless Chrome → PDF (print-perfect A4)
 
 ## Requirements
@@ -25,6 +25,7 @@ pip install -r requirements.txt
 
 cp .env.example .env
 # edit .env and paste your OPENAI_API_KEY
+# OPENAI_MODEL defaults to gpt-5.4
 ```
 
 ## Run
@@ -38,7 +39,7 @@ Open [http://localhost:5050](http://localhost:5050). Paste a job description, cl
 ## How it works
 
 1. `POST /generate` receives the JD
-2. `ai_engine.py` asks `gpt-4o` to produce a JSON config (role title, ATS keywords, tailored summary, skills, experience overrides, 4 cover letter paragraphs)
+2. `ai_engine.py` asks the configured OpenAI model (default `gpt-5.4`) to produce a JSON config (role title, ATS keywords, tailored summary, skills, experience overrides, 4 cover letter paragraphs)
 3. `generator.py` and `cover_letter_generator.py` render HTML templates populated with that config
 4. Chrome prints each to a single-page PDF
 5. Download URLs stream back to the frontend via SSE
@@ -59,5 +60,6 @@ cropped_circle_image.png     Profile photo used by the PDF
 ## Notes
 
 - The port is **5050**, not 5000 — macOS 12+ runs AirPlay Receiver on 5000 by default and intercepts `localhost:5000`.
+- Override the default model with `OPENAI_MODEL` in `.env` or your deployment environment if you want to switch later.
 - Static candidate details (name, phone, email, work history) live in `generator.py` under `PROFILE` and `BASE_EXPERIENCE`. Edit them to personalise.
 - The hardcoded `ROLE_CONFIGS` list at the top of `generator.py` is the legacy batch mode — `python generator.py` still renders the full company set without the web UI.
