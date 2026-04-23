@@ -766,6 +766,7 @@
         }
 
         .progress-wrap {
+            position: relative;
             height: 8px;
             border-radius: 999px;
             overflow: hidden;
@@ -773,12 +774,191 @@
         }
 
         .progress-bar {
+            position: relative;
             height: 100%;
             width: 0;
             border-radius: inherit;
             background: linear-gradient(90deg, #6995be, var(--accent));
             box-shadow: 0 0 20px rgba(232, 177, 123, 0.25);
-            transition: width 0.4s ease;
+            transition: width 0.6s cubic-bezier(0.22, 0.61, 0.36, 1);
+            overflow: hidden;
+        }
+
+        .progress-bar.is-active::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(
+                90deg,
+                transparent 0%,
+                rgba(255, 255, 255, 0.0) 30%,
+                rgba(255, 255, 255, 0.55) 50%,
+                rgba(255, 255, 255, 0.0) 70%,
+                transparent 100%
+            );
+            animation: progressSweep 1.5s linear infinite;
+        }
+
+        @keyframes progressSweep {
+            0%   { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .progress-meta-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .progress-meta-row > span:first-child {
+            display: block;
+            color: var(--muted);
+            font-size: 0.85rem;
+            margin: 0;
+        }
+
+        .progress-meta .elapsed {
+            font-family: var(--mono-font);
+            font-size: 0.82rem;
+            color: var(--accent-strong);
+            letter-spacing: 0.04em;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .progress-meta .elapsed.is-visible {
+            opacity: 1;
+        }
+
+        .progress-status {
+            margin-top: 8px;
+            min-height: 18px;
+            font-size: 0.83rem;
+            color: var(--text-soft);
+            line-height: 1.4;
+            opacity: 0;
+            transform: translateY(2px);
+            transition: opacity 0.35s ease, transform 0.35s ease;
+        }
+
+        .progress-status.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Status dot pulse */
+        .status-dot.is-pulsing {
+            animation: dotPulse 1.6s ease-out infinite;
+        }
+
+        @keyframes dotPulse {
+            0%   { box-shadow: 0 0 0 0 rgba(232, 177, 123, 0.55); }
+            70%  { box-shadow: 0 0 0 14px rgba(232, 177, 123, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(232, 177, 123, 0); }
+        }
+
+        /* Phase pipeline */
+        .phase-pipeline {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0;
+            margin-top: 18px;
+            padding: 14px 16px;
+            border-radius: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background:
+                linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+                rgba(5, 11, 19, 0.55);
+        }
+
+        .phase-step {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 8px;
+            padding: 0 6px;
+        }
+
+        .phase-step:not(:last-child)::after {
+            content: "";
+            position: absolute;
+            top: 9px;
+            left: calc(50% + 14px);
+            right: calc(-50% + 14px);
+            height: 2px;
+            background: rgba(255, 255, 255, 0.1);
+            transition: background 0.4s ease;
+        }
+
+        .phase-step.is-done::after,
+        .phase-step.is-active::after {
+            background: linear-gradient(90deg, var(--accent), rgba(232, 177, 123, 0.18));
+        }
+
+        .phase-node {
+            position: relative;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid rgba(255, 255, 255, 0.14);
+            transition: background 0.3s ease, border-color 0.3s ease, transform 0.2s ease;
+        }
+
+        .phase-step.is-active .phase-node {
+            background: var(--accent);
+            border-color: var(--accent-strong);
+            box-shadow: 0 0 0 5px rgba(232, 177, 123, 0.18);
+            animation: dotPulse 1.6s ease-out infinite;
+        }
+
+        .phase-step.is-done .phase-node {
+            background: var(--success);
+            border-color: rgba(146, 216, 171, 0.6);
+        }
+
+        .phase-step.is-done .phase-node::after {
+            content: "✓";
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            color: #0d1420;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .phase-label {
+            font-size: 0.74rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-weight: 600;
+            transition: color 0.3s ease;
+        }
+
+        .phase-step.is-active .phase-label {
+            color: var(--accent-strong);
+        }
+
+        .phase-step.is-done .phase-label {
+            color: var(--text-soft);
+        }
+
+        @media (max-width: 900px) {
+            .phase-pipeline {
+                padding: 12px 8px;
+            }
+            .phase-label {
+                font-size: 0.66rem;
+                letter-spacing: 0.06em;
+            }
         }
 
         .info-strip {
@@ -1546,10 +1726,33 @@
                             </div>
 
                             <div class="progress-meta">
-                                <span>Generation Progress</span>
+                                <div class="progress-meta-row">
+                                    <span>Generation Progress</span>
+                                    <span class="elapsed" id="elapsedTimer">0s</span>
+                                </div>
                                 <div class="progress-wrap">
                                     <div class="progress-bar" id="progressBar"></div>
                                 </div>
+                                <div class="progress-status" id="progressStatus"></div>
+                            </div>
+                        </div>
+
+                        <div class="phase-pipeline" id="phasePipeline">
+                            <div class="phase-step" data-phase="strategy">
+                                <span class="phase-node"></span>
+                                <span class="phase-label">Strategy</span>
+                            </div>
+                            <div class="phase-step" data-phase="cv">
+                                <span class="phase-node"></span>
+                                <span class="phase-label">CV Draft</span>
+                            </div>
+                            <div class="phase-step" data-phase="letter">
+                                <span class="phase-node"></span>
+                                <span class="phase-label">Cover Letter</span>
+                            </div>
+                            <div class="phase-step" data-phase="pdf">
+                                <span class="phase-node"></span>
+                                <span class="phase-label">PDFs</span>
                             </div>
                         </div>
 
@@ -1716,6 +1919,177 @@
             done: 100,
         };
 
+        // ── Loading UX state ───────────────────────────────────────────────
+        const elapsedTimer = $("elapsedTimer");
+        const progressStatus = $("progressStatus");
+        const phasePipeline = $("phasePipeline");
+        const PHASE_ORDER = ["strategy", "cv", "letter", "pdf"];
+
+        const PHASE_MESSAGES = {
+            strategy: [
+                "Reading the job description end to end…",
+                "Mapping required competencies to your experience…",
+                "Identifying the strongest positioning angles…",
+                "Selecting evidence and metrics from your CV…",
+                "Building the strategic brief for the writer…",
+            ],
+            cv: [
+                "Drafting a tailored professional summary…",
+                "Selecting bullets that match the role's priorities…",
+                "Embedding ATS keywords naturally throughout…",
+                "Polishing impact statements with metrics…",
+                "Quality-checking phrasing and structure…",
+            ],
+            letter: [
+                "Opening with a hook tied to the company…",
+                "Connecting your achievements to the role…",
+                "Tightening the value proposition…",
+                "Removing generic phrasing and clichés…",
+                "Finalising the close and signature…",
+            ],
+            pdf: [
+                "Rendering the CV PDF…",
+                "Rendering the cover letter PDF…",
+                "Polishing layout and spacing…",
+                "Almost there…",
+            ],
+        };
+
+        let simulatedProgressTimer = null;
+        let simulatedProgressTarget = 0;
+        let elapsedTimerHandle = null;
+        let elapsedStartedAt = null;
+        let rotatingMessageHandle = null;
+        let rotatingMessageIndex = 0;
+        let activePhase = null;
+
+        function startSimulatedProgress(targetCap) {
+            simulatedProgressTarget = targetCap;
+            if (simulatedProgressTimer) return;
+            simulatedProgressTimer = setInterval(() => {
+                const current = parseFloat(progressBar.style.width) || 0;
+                if (current >= simulatedProgressTarget - 0.5) return;
+                // Ease the creep: faster when far from cap, slower as we approach
+                const gap = simulatedProgressTarget - current;
+                const step = Math.max(0.08, Math.min(0.45, gap * 0.018));
+                setProgress(Math.min(simulatedProgressTarget - 0.5, current + step));
+            }, 320);
+        }
+
+        function clearSimulatedProgress() {
+            if (simulatedProgressTimer) {
+                clearInterval(simulatedProgressTimer);
+                simulatedProgressTimer = null;
+            }
+        }
+
+        function setProgressActive(active) {
+            progressBar.classList.toggle("is-active", Boolean(active));
+        }
+
+        function startElapsedTimer() {
+            elapsedStartedAt = Date.now();
+            elapsedTimer.textContent = "0s";
+            elapsedTimer.classList.add("is-visible");
+            if (elapsedTimerHandle) clearInterval(elapsedTimerHandle);
+            elapsedTimerHandle = setInterval(() => {
+                const seconds = Math.floor((Date.now() - elapsedStartedAt) / 1000);
+                elapsedTimer.textContent = `${seconds}s`;
+            }, 250);
+        }
+
+        function stopElapsedTimer(keepVisible) {
+            if (elapsedTimerHandle) {
+                clearInterval(elapsedTimerHandle);
+                elapsedTimerHandle = null;
+            }
+            if (!keepVisible) {
+                elapsedTimer.classList.remove("is-visible");
+            }
+        }
+
+        function showStatusMessage(text) {
+            if (!text) {
+                progressStatus.classList.remove("is-visible");
+                return;
+            }
+            progressStatus.textContent = text;
+            progressStatus.classList.add("is-visible");
+        }
+
+        function startRotatingMessages(phase) {
+            stopRotatingMessages();
+            const messages = PHASE_MESSAGES[phase];
+            if (!messages || messages.length === 0) return;
+            rotatingMessageIndex = 0;
+            showStatusMessage(messages[0]);
+            rotatingMessageHandle = setInterval(() => {
+                rotatingMessageIndex = (rotatingMessageIndex + 1) % messages.length;
+                // Soft fade between messages
+                progressStatus.classList.remove("is-visible");
+                setTimeout(() => {
+                    progressStatus.textContent = messages[rotatingMessageIndex];
+                    progressStatus.classList.add("is-visible");
+                }, 180);
+            }, 4000);
+        }
+
+        function stopRotatingMessages() {
+            if (rotatingMessageHandle) {
+                clearInterval(rotatingMessageHandle);
+                rotatingMessageHandle = null;
+            }
+        }
+
+        function setPhaseState(phaseId, state) {
+            const step = phasePipeline.querySelector(`[data-phase="${phaseId}"]`);
+            if (!step) return;
+            step.classList.remove("is-active", "is-done");
+            if (state === "active" || state === "done") {
+                step.classList.add(state === "done" ? "is-done" : "is-active");
+            }
+        }
+
+        function advanceToPhase(phaseId, cap) {
+            if (activePhase === phaseId) return;
+            // Mark all earlier phases done, this one active
+            const idx = PHASE_ORDER.indexOf(phaseId);
+            PHASE_ORDER.forEach((id, i) => {
+                if (i < idx) setPhaseState(id, "done");
+                else if (i === idx) setPhaseState(id, "active");
+                else setPhaseState(id, "");
+            });
+            activePhase = phaseId;
+            startRotatingMessages(phaseId);
+            if (typeof cap === "number") {
+                clearSimulatedProgress();
+                startSimulatedProgress(cap);
+            }
+        }
+
+        function resetPipeline() {
+            PHASE_ORDER.forEach((id) => setPhaseState(id, ""));
+            activePhase = null;
+        }
+
+        function finishLoadingUX(success) {
+            clearSimulatedProgress();
+            stopRotatingMessages();
+            setProgressActive(false);
+            statusDot.classList.remove("is-pulsing");
+            if (success) {
+                PHASE_ORDER.forEach((id) => setPhaseState(id, "done"));
+                showStatusMessage("All done — your documents are ready.");
+                setTimeout(() => showStatusMessage(""), 4000);
+                stopElapsedTimer(true);
+            } else {
+                showStatusMessage("");
+                stopElapsedTimer(false);
+                resetPipeline();
+            }
+        }
+        // ── End loading UX state ──────────────────────────────────────────
+
         function now() {
             const d = new Date();
             return d.toTimeString().slice(0, 8);
@@ -1736,6 +2110,7 @@
 
         function setStatus(text, state) {
             statusText.textContent = text;
+            statusDot.classList.toggle("is-pulsing", state === "busy");
             if (state === "error") {
                 statusDot.style.background = "var(--danger)";
                 statusDot.style.boxShadow = "0 0 0 7px rgba(239, 139, 136, 0.14)";
@@ -2052,14 +2427,18 @@
         function handleEvent(ev) {
             const step = ev.status;
             if (typeof ev.progress === "number") {
+                // Advance simulated cap so creep continues past server-reported point
+                simulatedProgressTarget = Math.max(simulatedProgressTarget, ev.progress + 4);
                 setProgress(ev.progress);
             } else if (PROGRESS_STEPS[step] !== undefined) {
+                simulatedProgressTarget = Math.max(simulatedProgressTarget, PROGRESS_STEPS[step] + 4);
                 setProgress(PROGRESS_STEPS[step]);
             }
 
             if (step === "analysing") {
                 pushLog(ev.message, "active");
                 setStatus("Analysing", "busy");
+                advanceToPhase("strategy", 32);
                 return;
             }
 
@@ -2072,24 +2451,47 @@
                 renderRenderOptions(ev.render_options);
                 renderKeywords(ev.keywords);
                 setStatus("Tailoring", "busy");
+                // Strategy + CV done by the time keywords arrive (CV draft is complete)
+                setPhaseState("strategy", "done");
+                advanceToPhase("letter", 80);
                 return;
             }
 
             if (step === "ai_phase") {
                 pushLog(ev.message, "active");
                 setStatus("Analysing", "busy");
+                // Map sub-phase events from the server to pipeline steps
+                const phaseTag = (ev.phase || "").toLowerCase();
+                if (phaseTag === "strategy") {
+                    advanceToPhase("strategy", 32);
+                } else if (phaseTag.includes("cv") || phaseTag.includes("skills") || phaseTag.includes("keyword") || phaseTag.includes("bullet")) {
+                    setPhaseState("strategy", "done");
+                    advanceToPhase("cv", 60);
+                } else if (phaseTag.includes("cover") || phaseTag.includes("letter")) {
+                    setPhaseState("strategy", "done");
+                    setPhaseState("cv", "done");
+                    advanceToPhase("letter", 80);
+                }
                 return;
             }
 
             if (step === "cv") {
                 pushLog(ev.message, "active");
                 setStatus("Rendering CV", "busy");
+                setPhaseState("strategy", "done");
+                setPhaseState("cv", "done");
+                setPhaseState("letter", "done");
+                advanceToPhase("pdf", 98);
                 return;
             }
 
             if (step === "letter") {
                 pushLog(ev.message, "active");
                 setStatus("Rendering cover letter", "busy");
+                setPhaseState("strategy", "done");
+                setPhaseState("cv", "done");
+                setPhaseState("letter", "done");
+                advanceToPhase("pdf", 98);
                 return;
             }
 
@@ -2112,6 +2514,7 @@
                     pushLog(timingParts.join(" | "), "success");
                 }
                 setStatus("Ready to download", "ok");
+                finishLoadingUX(true);
                 outRecipient.textContent = ev.recipient || outRecipient.textContent || "Dear Hiring Team,";
                 renderRenderOptions(ev.render_options);
                 const cvPayload = ev.cv_pdf_base64
@@ -2148,6 +2551,7 @@
                     console.error(ev.detail);
                 }
                 setStatus("Error", "error");
+                finishLoadingUX(false);
             }
         }
 
@@ -2165,6 +2569,13 @@
             resetLog();
             setProgress(6);
             setStatus("Starting", "busy");
+            // Kick off the loading UX
+            resetPipeline();
+            setProgressActive(true);
+            startElapsedTimer();
+            simulatedProgressTarget = 18;
+            startSimulatedProgress(18);
+            advanceToPhase("strategy", 32);
             pushLog("Submitted job description. Waiting for AI analysis...");
 
             const renderOptions = getRenderOptions();
@@ -2187,6 +2598,7 @@
                 pushLog(err.message || String(err), "error");
                 setStatus("Error", "error");
                 setProgress(0);
+                finishLoadingUX(false);
             } finally {
                 generateBtn.disabled = false;
                 btnLabel.textContent = "Generate Application";
@@ -2204,6 +2616,7 @@
             pushLog("Ready.");
             setProgress(0);
             setStatus("Ready", "ok");
+            finishLoadingUX(false);
         }
 
         // ── Application Questions ──────────────────────────────────────────
