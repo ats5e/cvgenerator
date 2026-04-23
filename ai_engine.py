@@ -985,3 +985,85 @@ def generate_config(
     ats_keywords = data.get("ats_keywords", [])
 
     return cv_config, cover_letter_content, ats_keywords
+
+
+# ---------------------------------------------------------------------------
+# Application question answering — single focused call, no strategy phase
+# ---------------------------------------------------------------------------
+
+QUESTION_SYSTEM_PROMPT = """\
+You write application question answers on behalf of Du-Toit Griesel, a senior marketing
+and brand management professional currently based in Dubai.
+
+RULES:
+- First-person throughout (I / me / my) — never refer to him by name or as he/him/his
+- 150–200 words — substantive enough to persuade, short enough to paste into a form field
+- Specific — ground every claim in a real role, real employer, real market, or real deliverable
+  from his background. No generic claims about "my experience" without naming the context.
+- Start with your strongest, most relevant point — no warm-up, no scene-setting sentence
+- Sound like a confident professional answering a direct question — not a cover letter
+
+BANNED OPENERS:
+✗ "I have always been passionate about…"
+✗ "This role excites me because…"
+✗ "I am thrilled / excited / delighted…"
+✗ "Throughout my career…"
+✗ "Having spent [X] years…"
+
+BANNED PHRASES (anywhere in the answer):
+✗ "passion for" / "passionate about"
+✗ "I am eager to bring"
+✗ "proven track record"
+✗ "results-driven"
+✗ "I would be a great fit" / "perfect fit"
+✗ "resonates with me"
+✗ "I look forward to contributing"
+✗ "goes without saying"
+
+Return ONLY the answer text. No label, no "Answer:" prefix, no preamble. Just the answer, ready to paste."""
+
+
+def answer_question(
+    job_description: str,
+    question: str,
+    company_name: str = "",
+    role_title: str = "",
+) -> str:
+    """
+    Generate a tailored answer to a single application screening question for Du-Toit.
+    Returns plain text ready to copy-paste into an application form.
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not set. Check your .env file.")
+
+    client = OpenAI(api_key=api_key)
+
+    context_line = ""
+    if role_title and company_name:
+        context_line = f"Applying for: {role_title} at {company_name}\n\n"
+    elif role_title:
+        context_line = f"Applying for: {role_title}\n\n"
+    elif company_name:
+        context_line = f"Applying to: {company_name}\n\n"
+
+    user_message = (
+        f"{context_line}"
+        f"JOB DESCRIPTION:\n{job_description.strip()}\n\n"
+        f"{CANDIDATE_CONTEXT}\n\n"
+        f"APPLICATION QUESTION:\n{question.strip()}\n\n"
+        "Write a tailored answer (150–200 words). "
+        "Ground every sentence in real, specific experience. "
+        "Start with the single strongest, most relevant point."
+    )
+
+    resp = client.chat.completions.create(
+        model=_OPENAI_MODEL,
+        temperature=0.4,
+        timeout=_API_TIMEOUT,
+        messages=[
+            {"role": "system", "content": QUESTION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    return resp.choices[0].message.content.strip()

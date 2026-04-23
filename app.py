@@ -211,6 +211,33 @@ def generate():
     )
 
 
+@app.route("/answer-question", methods=["POST"])
+def answer_question():
+    data = request.get_json(force=True) or {}
+    job_description = (data.get("job_description") or "").strip()
+    question = (data.get("question") or "").strip()
+    company_name = (data.get("company_name") or "").strip()
+    role_title = (data.get("role_title") or "").strip()
+
+    if not job_description:
+        return jsonify({"error": "Paste a job description first — the AI needs it to tailor the answer."}), 400
+    if not question:
+        return jsonify({"error": "No question provided."}), 400
+
+    try:
+        answer = ai_engine.answer_question(
+            job_description=job_description,
+            question=question,
+            company_name=company_name,
+            role_title=role_title,
+        )
+        return jsonify({"answer": answer})
+    except Exception as error:  # noqa: BLE001
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({"error": _friendly_error_message(error)}), 500
+
+
 @app.route("/download/<path:filename>")
 def download(filename: str):
     # Prevent path traversal

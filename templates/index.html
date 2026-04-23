@@ -1145,7 +1145,8 @@
             .workspace,
             .result-card,
             .activity-card,
-            .history {
+            .history,
+            .questions-section {
                 border-radius: 24px;
                 padding: 18px;
             }
@@ -1160,7 +1161,8 @@
             .customisation-head,
             .workspace-top,
             .actions,
-            .history-item {
+            .history-item,
+            .questions-head {
                 flex-direction: column;
                 align-items: stretch;
             }
@@ -1168,6 +1170,220 @@
             .progress-meta {
                 min-width: 0;
             }
+
+            .question-input-row {
+                flex-direction: column;
+            }
+
+            .btn-answer {
+                width: 100%;
+            }
+        }
+
+        /* ── Application Questions section ─────────────────────────────── */
+
+        .questions-section {
+            position: relative;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(15, 27, 44, 0.92), rgba(8, 15, 25, 0.96));
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(24px);
+            border-radius: 32px;
+            padding: 28px 32px 32px;
+            margin-bottom: 24px;
+        }
+
+        .questions-section::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            pointer-events: none;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 36%);
+        }
+
+        .questions-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .questions-head h2 {
+            font-family: var(--display-font);
+            font-size: clamp(1.4rem, 2.2vw, 1.9rem);
+            font-weight: 600;
+            letter-spacing: -0.03em;
+            line-height: 1.1;
+            margin-bottom: 6px;
+        }
+
+        .questions-head p {
+            color: var(--text-soft);
+            font-size: 0.97rem;
+            line-height: 1.6;
+            max-width: 62ch;
+        }
+
+        .questions-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .questions-empty {
+            padding: 28px 0 8px;
+            color: var(--muted);
+            font-size: 0.95rem;
+            text-align: center;
+        }
+
+        .question-card {
+            border: 1px solid var(--line);
+            border-radius: 22px;
+            padding: 20px 22px;
+            background: rgba(255, 255, 255, 0.025);
+            transition: border-color 0.2s ease;
+        }
+
+        .question-card:focus-within {
+            border-color: rgba(232, 177, 123, 0.35);
+        }
+
+        .question-card-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .question-label {
+            font-size: 0.8rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .question-remove {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--muted);
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: background 0.16s ease, color 0.16s ease;
+            line-height: 1;
+            padding: 0;
+        }
+
+        .question-remove:hover {
+            background: rgba(239, 139, 136, 0.16);
+            color: var(--danger);
+            border-color: rgba(239, 139, 136, 0.3);
+        }
+
+        .question-input-row {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .question-textarea {
+            flex: 1;
+            min-height: 72px;
+            resize: vertical;
+            font-size: 0.97rem;
+            line-height: 1.55;
+        }
+
+        .btn-answer {
+            min-height: 72px;
+            min-width: 148px;
+            white-space: nowrap;
+            background: linear-gradient(135deg, rgba(232, 177, 123, 0.18), rgba(232, 177, 123, 0.08));
+            border-color: rgba(232, 177, 123, 0.3);
+            color: var(--accent-strong);
+            font-size: 0.95rem;
+        }
+
+        .btn-answer:hover:not(:disabled) {
+            background: linear-gradient(135deg, rgba(232, 177, 123, 0.28), rgba(232, 177, 123, 0.14));
+            border-color: rgba(232, 177, 123, 0.5);
+        }
+
+        .answer-block {
+            margin-top: 16px;
+            border-top: 1px solid var(--line);
+            padding-top: 16px;
+        }
+
+        .answer-text {
+            color: var(--text);
+            font-size: 0.97rem;
+            line-height: 1.72;
+            white-space: pre-wrap;
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 14px;
+            padding: 16px 18px;
+        }
+
+        .answer-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 10px;
+            gap: 12px;
+        }
+
+        .answer-word-count {
+            font-size: 0.82rem;
+            color: var(--muted);
+            letter-spacing: 0.04em;
+        }
+
+        .btn-copy {
+            min-height: 40px;
+            padding: 0 18px;
+            border-radius: 12px;
+            font-size: 0.88rem;
+            border-color: rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-soft);
+            transition:
+                background 0.16s ease,
+                border-color 0.16s ease,
+                color 0.16s ease,
+                transform 0.14s ease;
+        }
+
+        .btn-copy:hover {
+            background: rgba(146, 216, 171, 0.1);
+            border-color: rgba(146, 216, 171, 0.3);
+            color: var(--success);
+        }
+
+        .btn-copy.copied {
+            background: rgba(146, 216, 171, 0.14);
+            border-color: rgba(146, 216, 171, 0.4);
+            color: var(--success);
+        }
+
+        .answer-error {
+            margin-top: 12px;
+            padding: 12px 16px;
+            border-radius: 14px;
+            background: rgba(239, 139, 136, 0.1);
+            border: 1px solid rgba(239, 139, 136, 0.2);
+            color: var(--danger);
+            font-size: 0.92rem;
         }
     </style>
 </head>
@@ -1407,6 +1623,19 @@
                         </div>
                     </section>
                 </section>
+            </div>
+        </section>
+
+        <section class="questions-section" id="questionsSection">
+            <div class="questions-head">
+                <div>
+                    <h2>Application Questions</h2>
+                    <p>Add any screening questions from the application form. The AI generates a tailored answer using the job description above — ready to copy and paste directly.</p>
+                </div>
+                <button id="addQuestionBtn" class="btn btn-secondary" type="button">+ Add Question</button>
+            </div>
+            <div class="questions-list" id="questionsList">
+                <div class="questions-empty" id="questionsEmpty">No questions added yet. Click <strong>+ Add Question</strong> to get started.</div>
             </div>
         </section>
 
@@ -1952,6 +2181,171 @@
             setProgress(0);
             setStatus("Ready", "ok");
         }
+
+        // ── Application Questions ──────────────────────────────────────────
+
+        let questionCounter = 0;
+        const questionsList = $("questionsList");
+        const questionsEmpty = $("questionsEmpty");
+        const addQuestionBtn = $("addQuestionBtn");
+
+        function updateQuestionsEmpty() {
+            const cards = questionsList.querySelectorAll(".question-card");
+            questionsEmpty.style.display = cards.length === 0 ? "block" : "none";
+        }
+
+        function countWords(text) {
+            return text.trim().split(/\s+/).filter(Boolean).length;
+        }
+
+        function addQuestionCard() {
+            questionCounter += 1;
+            const card = document.createElement("article");
+            card.className = "question-card";
+            card.dataset.qid = questionCounter;
+
+            card.innerHTML = `
+                <div class="question-card-top">
+                    <span class="question-label">Question ${questionCounter}</span>
+                    <button class="question-remove" type="button" title="Remove question" aria-label="Remove question">×</button>
+                </div>
+                <div class="question-input-row">
+                    <textarea
+                        class="input question-textarea"
+                        placeholder='e.g. "Why do you want to work at this company?" or "What makes you the right person for this role?"'
+                        rows="2"
+                    ></textarea>
+                    <button class="btn btn-answer" type="button">Generate Answer</button>
+                </div>
+                <div class="answer-block" style="display:none">
+                    <div class="answer-text"></div>
+                    <div class="answer-footer">
+                        <span class="answer-word-count"></span>
+                        <button class="btn btn-copy" type="button">Copy Answer</button>
+                    </div>
+                </div>
+            `;
+
+            // Remove button
+            card.querySelector(".question-remove").addEventListener("click", () => {
+                card.remove();
+                updateQuestionsEmpty();
+            });
+
+            // Generate answer button
+            card.querySelector(".btn-answer").addEventListener("click", () => handleAnswerQuestion(card));
+
+            // Copy button
+            card.querySelector(".btn-copy").addEventListener("click", () => handleCopyAnswer(card));
+
+            questionsList.appendChild(card);
+            updateQuestionsEmpty();
+            card.querySelector(".question-textarea").focus();
+        }
+
+        async function handleAnswerQuestion(card) {
+            const jd = jobDescription.value.trim();
+            if (!jd) {
+                showAnswerError(card, "Paste a job description at the top first — the AI needs it to tailor the answer.");
+                return;
+            }
+
+            const questionText = card.querySelector(".question-textarea").value.trim();
+            if (!questionText) {
+                showAnswerError(card, "Type or paste your question first.");
+                return;
+            }
+
+            const answerBtn = card.querySelector(".btn-answer");
+            const answerBlock = card.querySelector(".answer-block");
+            const answerText = card.querySelector(".answer-text");
+            const wordCount = card.querySelector(".answer-word-count");
+            const copyBtn = card.querySelector(".btn-copy");
+
+            // Remove any prior error
+            const existingError = card.querySelector(".answer-error");
+            if (existingError) existingError.remove();
+
+            answerBtn.disabled = true;
+            answerBtn.innerHTML = '<span class="spinner"></span> Generating…';
+            answerBlock.style.display = "none";
+
+            try {
+                const resp = await fetch("/answer-question", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        job_description: jd,
+                        question: questionText,
+                        company_name: outCompany.textContent !== "-" ? outCompany.textContent : companyInput.value.trim(),
+                        role_title: outRole.textContent !== "-" ? outRole.textContent : roleInput.value.trim(),
+                    }),
+                });
+
+                const data = await resp.json();
+
+                if (!resp.ok || data.error) {
+                    showAnswerError(card, data.error || `Server error ${resp.status}`);
+                    return;
+                }
+
+                answerText.textContent = data.answer;
+                wordCount.textContent = `${countWords(data.answer)} words`;
+                copyBtn.textContent = "Copy Answer";
+                copyBtn.classList.remove("copied");
+                answerBlock.style.display = "block";
+
+            } catch (err) {
+                showAnswerError(card, err.message || "Request failed. Check your connection.");
+            } finally {
+                answerBtn.disabled = false;
+                answerBtn.textContent = "Generate Answer";
+            }
+        }
+
+        function showAnswerError(card, message) {
+            const existing = card.querySelector(".answer-error");
+            if (existing) existing.remove();
+            const el = document.createElement("div");
+            el.className = "answer-error";
+            el.textContent = message;
+            card.querySelector(".question-input-row").insertAdjacentElement("afterend", el);
+        }
+
+        async function handleCopyAnswer(card) {
+            const answerText = card.querySelector(".answer-text").textContent;
+            if (!answerText) return;
+            const copyBtn = card.querySelector(".btn-copy");
+            try {
+                await navigator.clipboard.writeText(answerText);
+                copyBtn.textContent = "Copied ✓";
+                copyBtn.classList.add("copied");
+                setTimeout(() => {
+                    copyBtn.textContent = "Copy Answer";
+                    copyBtn.classList.remove("copied");
+                }, 2200);
+            } catch {
+                // Fallback for older browsers
+                const ta = document.createElement("textarea");
+                ta.value = answerText;
+                ta.style.position = "fixed";
+                ta.style.opacity = "0";
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand("copy");
+                document.body.removeChild(ta);
+                copyBtn.textContent = "Copied ✓";
+                copyBtn.classList.add("copied");
+                setTimeout(() => {
+                    copyBtn.textContent = "Copy Answer";
+                    copyBtn.classList.remove("copied");
+                }, 2200);
+            }
+        }
+
+        addQuestionBtn.addEventListener("click", addQuestionCard);
+
+        // ── End Application Questions ──────────────────────────────────────
 
         generateBtn.addEventListener("click", handleGenerate);
         clearBtn.addEventListener("click", handleClear);
