@@ -243,6 +243,45 @@ def answer_question():
         return jsonify({"error": _friendly_error_message(error)}), 500
 
 
+@app.route("/generate-inmail", methods=["POST"])
+def generate_inmail():
+    data = request.get_json(force=True) or {}
+    job_description = (data.get("job_description") or "").strip()
+    company_name = (data.get("company_name") or "").strip()
+    role_title = (data.get("role_title") or "").strip()
+    recipient_type = (data.get("recipient_type") or "recruiter").strip().lower()
+    recipient_name = (data.get("recipient_name") or "").strip()
+    recipient_role = (data.get("recipient_role") or "").strip()
+    message_goal = (data.get("message_goal") or "introduction").strip().lower()
+    tone = (data.get("tone") or "polished").strip().lower()
+    length = (data.get("length") or "short").strip().lower()
+    shared_context = (data.get("shared_context") or "").strip()
+    custom_cta = (data.get("custom_cta") or "").strip()
+
+    if not job_description:
+        return jsonify({"error": "Paste a job description first so the InMail can be tailored properly."}), 400
+
+    try:
+        result = ai_engine.generate_inmail(
+            job_description=job_description,
+            company_name=company_name,
+            role_title=role_title,
+            recipient_type=recipient_type,
+            recipient_name=recipient_name,
+            recipient_role=recipient_role,
+            message_goal=message_goal,
+            tone=tone,
+            length=length,
+            shared_context=shared_context,
+            custom_cta=custom_cta,
+        )
+        return jsonify(result)
+    except Exception as error:  # noqa: BLE001
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({"error": _friendly_error_message(error)}), 500
+
+
 @app.route("/download/<path:filename>")
 def download(filename: str):
     # Prevent path traversal

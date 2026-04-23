@@ -1334,7 +1334,9 @@
             .field-row,
             .option-grid,
             .result-grid,
-            .download-grid {
+            .download-grid,
+            .inmail-grid,
+            .inmail-output-grid {
                 grid-template-columns: 1fr;
             }
 
@@ -1356,6 +1358,15 @@
             }
 
             .btn-answer {
+                width: 100%;
+            }
+
+            .inmail-copy-row {
+                width: 100%;
+            }
+
+            .inmail-copy-row .btn-copy,
+            .btn-inmail {
                 width: 100%;
             }
         }
@@ -1588,6 +1599,55 @@
             border: 1px solid rgba(239, 139, 136, 0.2);
             color: var(--danger);
             font-size: 0.92rem;
+        }
+
+        .inmail-grid,
+        .inmail-output-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+        }
+
+        .inmail-grid {
+            margin-top: 8px;
+        }
+
+        .inmail-field-span {
+            grid-column: 1 / -1;
+        }
+
+        .inmail-context {
+            min-height: 138px;
+        }
+
+        .inmail-output {
+            margin-top: 18px;
+            padding-top: 18px;
+            border-top: 1px solid var(--line);
+            display: grid;
+            gap: 16px;
+        }
+
+        .inmail-message {
+            min-height: 220px;
+        }
+
+        .inmail-copy-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .btn-inmail {
+            background: linear-gradient(135deg, rgba(232, 177, 123, 0.18), rgba(102, 149, 190, 0.12));
+            border-color: rgba(232, 177, 123, 0.28);
+            color: var(--accent-strong);
+        }
+
+        .btn-inmail:hover:not(:disabled) {
+            background: linear-gradient(135deg, rgba(232, 177, 123, 0.28), rgba(102, 149, 190, 0.18));
+            border-color: rgba(232, 177, 123, 0.45);
         }
     </style>
 </head>
@@ -1866,6 +1926,112 @@
             </div>
         </section>
 
+        <section class="questions-section" id="inmailSection">
+            <div class="questions-head">
+                <div>
+                    <h2>LinkedIn InMail Generator</h2>
+                    <p>Generate a recruiter or employee outreach note from the same job description, then edit the subject, greeting, body, and sign-off before you copy it.</p>
+                </div>
+                <button id="generateInmailBtn" class="btn btn-secondary btn-inmail" type="button">Generate InMail</button>
+            </div>
+
+            <div class="inmail-grid">
+                <div class="field">
+                    <label for="inmailRecipientType">Recipient Type</label>
+                    <select id="inmailRecipientType" class="input">
+                        <option value="recruiter">Recruiter / Talent Team</option>
+                        <option value="employee">Employee / Hiring Team</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="inmailRecipientName">Recipient Name</label>
+                    <input id="inmailRecipientName" class="input" type="text" placeholder="Example: Sarah Ahmed" />
+                </div>
+                <div class="field">
+                    <label for="inmailRecipientRole">Recipient Role</label>
+                    <input id="inmailRecipientRole" class="input" type="text" placeholder="Example: Senior Talent Acquisition Partner" />
+                </div>
+                <div class="field">
+                    <label for="inmailGoal">Message Goal</label>
+                    <select id="inmailGoal" class="input">
+                        <option value="introduction">Introduce Du-Toit for the role</option>
+                        <option value="follow_up">Follow up after applying</option>
+                        <option value="conversation">Ask for a short conversation</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="inmailTone">Tone</label>
+                    <select id="inmailTone" class="input">
+                        <option value="polished">Polished</option>
+                        <option value="direct">Direct</option>
+                        <option value="warm">Warm</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="inmailLength">Length</label>
+                    <select id="inmailLength" class="input">
+                        <option value="short">Short</option>
+                        <option value="medium">Medium</option>
+                    </select>
+                </div>
+                <div class="field inmail-field-span">
+                    <label for="inmailSharedContext">Shared Context / Personal Note</label>
+                    <textarea
+                        id="inmailSharedContext"
+                        class="textarea inmail-context"
+                        placeholder="Optional: mention a mutual connection, a relevant team detail, or why this specific role caught your attention."
+                    ></textarea>
+                </div>
+                <div class="field inmail-field-span">
+                    <label for="inmailCta">Preferred Call To Action</label>
+                    <input
+                        id="inmailCta"
+                        class="input"
+                        type="text"
+                        placeholder="Optional: Example: Open to a short conversation if the role is still active."
+                    />
+                    <p class="field-note">
+                        The generator uses the detected company and role when available, or falls back to the fields at the top.
+                    </p>
+                </div>
+            </div>
+
+            <div class="answer-error" id="inmailError" style="display:none"></div>
+
+            <div class="inmail-output" id="inmailOutput" style="display:none">
+                <div class="answer-strategy" id="inmailStrategy"></div>
+
+                <div class="inmail-output-grid">
+                    <div class="field">
+                        <label for="inmailSubject">Subject Line</label>
+                        <input id="inmailSubject" class="input" type="text" placeholder="Generated subject line" />
+                    </div>
+                    <div class="field">
+                        <label for="inmailGreeting">Greeting</label>
+                        <input id="inmailGreeting" class="input" type="text" placeholder="Generated greeting" />
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label for="inmailBody">Message Body</label>
+                    <textarea id="inmailBody" class="textarea inmail-message" placeholder="Generated InMail body"></textarea>
+                </div>
+
+                <div class="field">
+                    <label for="inmailClosing">Sign-off</label>
+                    <input id="inmailClosing" class="input" type="text" placeholder="Generated sign-off" />
+                </div>
+
+                <div class="answer-footer">
+                    <span class="answer-word-count" id="inmailWordCount">0 words</span>
+                    <div class="inmail-copy-row">
+                        <button id="copyInmailSubjectBtn" class="btn btn-copy" type="button">Copy Subject</button>
+                        <button id="copyInmailBtn" class="btn btn-copy" type="button">Copy InMail</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <section class="history">
             <div class="history-head">
                 <div>
@@ -1907,6 +2073,25 @@
         const dlCv = $("dlCv");
         const dlLetter = $("dlLetter");
         const historyList = $("historyList");
+        const inmailRecipientType = $("inmailRecipientType");
+        const inmailRecipientName = $("inmailRecipientName");
+        const inmailRecipientRole = $("inmailRecipientRole");
+        const inmailGoal = $("inmailGoal");
+        const inmailTone = $("inmailTone");
+        const inmailLength = $("inmailLength");
+        const inmailSharedContext = $("inmailSharedContext");
+        const inmailCta = $("inmailCta");
+        const generateInmailBtn = $("generateInmailBtn");
+        const inmailError = $("inmailError");
+        const inmailOutput = $("inmailOutput");
+        const inmailStrategy = $("inmailStrategy");
+        const inmailSubject = $("inmailSubject");
+        const inmailGreeting = $("inmailGreeting");
+        const inmailBody = $("inmailBody");
+        const inmailClosing = $("inmailClosing");
+        const inmailWordCount = $("inmailWordCount");
+        const copyInmailSubjectBtn = $("copyInmailSubjectBtn");
+        const copyInmailBtn = $("copyInmailBtn");
         const segmentedButtons = [...document.querySelectorAll(".segmented-btn")];
         const liveDownloads = { cv: null, letter: null };
 
@@ -2258,6 +2443,45 @@
                 return;
             }
             triggerDownload(liveDownloads[slot]);
+        }
+
+        function getActiveApplicationContext() {
+            return {
+                company_name: outCompany.textContent !== "-" ? outCompany.textContent.trim() : companyInput.value.trim(),
+                role_title: outRole.textContent !== "-" ? outRole.textContent.trim() : roleInput.value.trim(),
+            };
+        }
+
+        async function copyTextToClipboard(text) {
+            if (!text) return false;
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch {
+                try {
+                    const ta = document.createElement("textarea");
+                    ta.value = text;
+                    ta.style.position = "fixed";
+                    ta.style.opacity = "0";
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(ta);
+                    return true;
+                } catch {
+                    return false;
+                }
+            }
+        }
+
+        function flashCopyState(button, idleLabel, copiedLabel) {
+            button.textContent = copiedLabel;
+            button.classList.add("copied");
+            clearTimeout(button._copyTimer);
+            button._copyTimer = setTimeout(() => {
+                button.textContent = idleLabel;
+                button.classList.remove("copied");
+            }, 2200);
         }
 
         dlCv.addEventListener("click", handleDownloadClick);
@@ -2612,6 +2836,7 @@
             recipientInput.value = "";
             disableDownloads();
             showResult(false);
+            resetInmailOutput();
             resetLog();
             pushLog("Ready.");
             setProgress(0);
@@ -2709,14 +2934,15 @@
             answerBlock.style.display = "none";
 
             try {
+                const context = getActiveApplicationContext();
                 const resp = await fetch("/answer-question", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         job_description: jd,
                         question: questionText,
-                        company_name: outCompany.textContent !== "-" ? outCompany.textContent : companyInput.value.trim(),
-                        role_title: outRole.textContent !== "-" ? outRole.textContent : roleInput.value.trim(),
+                        company_name: context.company_name,
+                        role_title: context.role_title,
                     }),
                 });
 
@@ -2784,36 +3010,163 @@
             const answerText = card.querySelector(".answer-text").textContent;
             if (!answerText) return;
             const copyBtn = card.querySelector(".btn-copy");
-            try {
-                await navigator.clipboard.writeText(answerText);
-                copyBtn.textContent = "Copied ✓";
-                copyBtn.classList.add("copied");
-                setTimeout(() => {
-                    copyBtn.textContent = "Copy Answer";
-                    copyBtn.classList.remove("copied");
-                }, 2200);
-            } catch {
-                // Fallback for older browsers
-                const ta = document.createElement("textarea");
-                ta.value = answerText;
-                ta.style.position = "fixed";
-                ta.style.opacity = "0";
-                document.body.appendChild(ta);
-                ta.select();
-                document.execCommand("copy");
-                document.body.removeChild(ta);
-                copyBtn.textContent = "Copied ✓";
-                copyBtn.classList.add("copied");
-                setTimeout(() => {
-                    copyBtn.textContent = "Copy Answer";
-                    copyBtn.classList.remove("copied");
-                }, 2200);
+            const copied = await copyTextToClipboard(answerText);
+            if (!copied) {
+                showAnswerError(card, "Copy failed. Please copy the answer manually.");
+                return;
             }
+            flashCopyState(copyBtn, "Copy Answer", "Copied ✓");
         }
 
         addQuestionBtn.addEventListener("click", addQuestionCard);
 
         // ── End Application Questions ──────────────────────────────────────
+
+        // ── LinkedIn InMail Generator ──────────────────────────────────────
+
+        function showInmailError(message) {
+            inmailError.textContent = message;
+            inmailError.style.display = "block";
+        }
+
+        function hideInmailError() {
+            inmailError.textContent = "";
+            inmailError.style.display = "none";
+        }
+
+        function renderInmailStrategy(data) {
+            inmailStrategy.innerHTML = "";
+            if (data.approach) {
+                const chip = document.createElement("span");
+                chip.className = "chip chip-type";
+                chip.textContent = data.approach;
+                inmailStrategy.appendChild(chip);
+            }
+            (data.jd_keywords_used || []).forEach((kw) => {
+                const chip = document.createElement("span");
+                chip.className = "chip chip-kw";
+                chip.textContent = kw;
+                inmailStrategy.appendChild(chip);
+            });
+        }
+
+        function buildInmailText() {
+            return [
+                inmailGreeting.value.trim(),
+                inmailBody.value.trim(),
+                inmailClosing.value.trim(),
+            ].filter(Boolean).join("\n\n");
+        }
+
+        function updateInmailWordCount() {
+            inmailWordCount.textContent = `${countWords(buildInmailText())} words`;
+        }
+
+        function resetInmailOutput() {
+            hideInmailError();
+            inmailOutput.style.display = "none";
+            inmailStrategy.innerHTML = "";
+            inmailSubject.value = "";
+            inmailGreeting.value = "";
+            inmailBody.value = "";
+            inmailClosing.value = "";
+            inmailWordCount.textContent = "0 words";
+            copyInmailSubjectBtn.textContent = "Copy Subject";
+            copyInmailSubjectBtn.classList.remove("copied");
+            copyInmailBtn.textContent = "Copy InMail";
+            copyInmailBtn.classList.remove("copied");
+        }
+
+        async function handleGenerateInmail() {
+            const jd = jobDescription.value.trim();
+            if (!jd) {
+                showInmailError("Paste a job description at the top first — the AI needs it to tailor the InMail.");
+                return;
+            }
+
+            hideInmailError();
+            generateInmailBtn.disabled = true;
+            generateInmailBtn.innerHTML = '<span class="spinner"></span> Generating…';
+
+            const context = getActiveApplicationContext();
+
+            try {
+                const resp = await fetch("/generate-inmail", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        job_description: jd,
+                        company_name: context.company_name,
+                        role_title: context.role_title,
+                        recipient_type: inmailRecipientType.value,
+                        recipient_name: inmailRecipientName.value.trim(),
+                        recipient_role: inmailRecipientRole.value.trim(),
+                        message_goal: inmailGoal.value,
+                        tone: inmailTone.value,
+                        length: inmailLength.value,
+                        shared_context: inmailSharedContext.value.trim(),
+                        custom_cta: inmailCta.value.trim(),
+                    }),
+                });
+
+                const data = await resp.json();
+                if (!resp.ok || data.error) {
+                    showInmailError(data.error || `Server error ${resp.status}`);
+                    return;
+                }
+
+                inmailSubject.value = data.subject_line || "";
+                inmailGreeting.value = data.greeting || "";
+                inmailBody.value = data.message_body || "";
+                inmailClosing.value = data.closing_line || "";
+                renderInmailStrategy(data);
+                inmailOutput.style.display = "grid";
+                updateInmailWordCount();
+                pushLog("Generated tailored InMail copy.", "success");
+            } catch (err) {
+                showInmailError(err.message || "Request failed. Check your connection.");
+            } finally {
+                generateInmailBtn.disabled = false;
+                generateInmailBtn.textContent = "Generate InMail";
+            }
+        }
+
+        async function handleCopyInmailSubject() {
+            const subject = inmailSubject.value.trim();
+            if (!subject) {
+                showInmailError("Generate an InMail first so there is a subject to copy.");
+                return;
+            }
+            const copied = await copyTextToClipboard(subject);
+            if (!copied) {
+                showInmailError("Copy failed. Please copy the subject manually.");
+                return;
+            }
+            flashCopyState(copyInmailSubjectBtn, "Copy Subject", "Copied ✓");
+        }
+
+        async function handleCopyInmail() {
+            const message = buildInmailText();
+            if (!message) {
+                showInmailError("Generate an InMail first so there is text to copy.");
+                return;
+            }
+            const copied = await copyTextToClipboard(message);
+            if (!copied) {
+                showInmailError("Copy failed. Please copy the InMail manually.");
+                return;
+            }
+            flashCopyState(copyInmailBtn, "Copy InMail", "Copied ✓");
+        }
+
+        generateInmailBtn.addEventListener("click", handleGenerateInmail);
+        copyInmailSubjectBtn.addEventListener("click", handleCopyInmailSubject);
+        copyInmailBtn.addEventListener("click", handleCopyInmail);
+        [inmailGreeting, inmailBody, inmailClosing].forEach((field) => {
+            field.addEventListener("input", updateInmailWordCount);
+        });
+
+        // ── End LinkedIn InMail Generator ─────────────────────────────────
 
         generateBtn.addEventListener("click", handleGenerate);
         clearBtn.addEventListener("click", handleClear);

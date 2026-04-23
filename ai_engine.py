@@ -1178,3 +1178,211 @@ def answer_question(
             if str(k).strip()
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn InMail generation
+# Tailored outreach for recruiter or employee contacts using the live JD.
+# ---------------------------------------------------------------------------
+
+INMAIL_SYSTEM_PROMPT = """\
+You write LinkedIn InMail messages for Du-Toit Griesel, a Dubai-based senior agency
+professional targeting marketing, brand, and client leadership roles across the GCC.
+
+These are short outreach notes to a recruiter or employee about a live role.
+They must feel specific, senior, and commercially aware — never like a cover letter
+and never like a generic networking template.
+
+NON-NEGOTIABLE RULES
+- Write in first-person singular only.
+- Use the job description's exact vocabulary naturally 2-4 times.
+- Ground every claim in the provided candidate context. Do not invent metrics,
+  mutual connections, campaigns, awards, referrals, or personal details.
+- Mention 1-2 real specifics from Du-Toit's background where relevant:
+  Yellow, VMLY&R, Ogilvy, Dubai/UAE market experience, integrated campaigns,
+  client leadership, stakeholder management, branding/digital delivery.
+- Keep it concise and skimmable for LinkedIn.
+- No bullet points. No emojis. No hashtags.
+
+ADAPT TO RECIPIENT TYPE
+- Recruiter: lead with role fit, market relevance, and why Du-Toit is easy to assess quickly.
+- Employee: sound slightly warmer and more peer-level; reference why the role/team/work
+  seems relevant and ask for light guidance or a brief conversation naturally.
+
+BANNED PHRASES
+- "I hope you're well"
+- "I came across this role and..."
+- "I am excited / thrilled / delighted"
+- "passion for"
+- "proven track record"
+- "results-driven"
+- "I would love to pick your brain"
+- "I would be a great fit"
+- "I look forward to hearing from you"
+
+STYLE TARGET
+- Senior, direct, polished, human
+- Specific opening line; no soft warm-up
+- One compact message body, ready to paste into LinkedIn
+- Closing should be brief and professional
+
+Return ONLY valid JSON matching the requested schema."""
+
+
+INMAIL_USER_TEMPLATE = """\
+{context_line}JOB DESCRIPTION:
+{job_description}
+
+{candidate_context}
+
+INMAIL SETTINGS:
+- Recipient type: {recipient_type}
+- Recipient name: {recipient_name}
+- Recipient role: {recipient_role}
+- Message goal: {message_goal}
+- Tone: {tone}
+- Length target: {length}
+- Shared context to use if relevant: {shared_context}
+- Preferred CTA: {custom_cta}
+
+Write the strongest possible tailored outreach note for this role.
+
+Return JSON:
+{{
+  "approach": "8-16 words describing the message angle",
+  "subject_line": "Short subject line, 4-9 words, clear and specific",
+  "greeting": "Hi Sarah, or Hello,",
+  "message_body": "The full LinkedIn InMail body, ready to paste",
+  "closing_line": "Short sign-off, e.g. Best, Du-Toit",
+  "jd_keywords_used": ["exact phrase 1", "exact phrase 2"]
+}}"""
+
+
+def generate_inmail(
+    job_description: str,
+    company_name: str = "",
+    role_title: str = "",
+    recipient_type: str = "recruiter",
+    recipient_name: str = "",
+    recipient_role: str = "",
+    message_goal: str = "introduction",
+    tone: str = "polished",
+    length: str = "short",
+    shared_context: str = "",
+    custom_cta: str = "",
+) -> dict:
+    """
+    Generate a tailored LinkedIn InMail for Du-Toit.
+
+    Returns a dict with keys:
+      approach         — short description of the messaging angle
+      subject_line     — editable subject
+      greeting         — editable salutation
+      message_body     — editable body copy
+      closing_line     — editable sign-off
+      jd_keywords_used — JD phrases woven into the copy
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not set. Check your .env file.")
+
+    client = OpenAI(api_key=api_key)
+
+    recipient_type_key = (recipient_type or "").strip().lower()
+    if recipient_type_key not in {"recruiter", "employee"}:
+        recipient_type_key = "recruiter"
+
+    message_goal_key = (message_goal or "").strip().lower()
+    tone_key = (tone or "").strip().lower()
+    length_key = (length or "").strip().lower()
+
+    recipient_type_label = {
+        "recruiter": "Recruiter or talent-acquisition contact",
+        "employee": "Employee or hiring-team contact",
+    }[recipient_type_key]
+    message_goal_label = {
+        "introduction": "Introduce Du-Toit in relation to the role before or alongside applying",
+        "follow_up": "Follow up after applying for the role",
+        "conversation": "Ask for a brief conversation or light direction on the opportunity",
+    }.get(message_goal_key, "Introduce Du-Toit in relation to the role before or alongside applying")
+    tone_label = {
+        "direct": "Direct and commercially sharp",
+        "warm": "Warm but still polished and professional",
+        "polished": "Polished, confident, and senior",
+    }.get(tone_key, "Polished, confident, and senior")
+    length_label = {
+        "short": "Short LinkedIn note, around 75-110 words",
+        "medium": "Medium LinkedIn note, around 110-150 words",
+    }.get(length_key, "Short LinkedIn note, around 75-110 words")
+
+    context_line = ""
+    if role_title and company_name:
+        context_line = f"Role in scope: {role_title} at {company_name}\n\n"
+    elif role_title:
+        context_line = f"Role in scope: {role_title}\n\n"
+    elif company_name:
+        context_line = f"Company in scope: {company_name}\n\n"
+
+    user_message = INMAIL_USER_TEMPLATE.format(
+        context_line=context_line,
+        job_description=job_description.strip(),
+        candidate_context=CANDIDATE_CONTEXT,
+        recipient_type=recipient_type_label,
+        recipient_name=recipient_name.strip() or "Not provided",
+        recipient_role=recipient_role.strip() or "Not provided",
+        message_goal=message_goal_label,
+        tone=tone_label,
+        length=length_label,
+        shared_context=(
+            shared_context.strip()
+            or "None provided. Do not invent any mutual contact, referral, or shared background."
+        ),
+        custom_cta=(
+            custom_cta.strip()
+            or "No specific CTA supplied. End with a light, professional next step."
+        ),
+    )
+
+    resp = client.chat.completions.create(
+        model=_OPENAI_MODEL,
+        temperature=0.45,
+        timeout=_API_TIMEOUT,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": INMAIL_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    raw = re.sub(
+        r"^```(?:json)?\s*|\s*```$",
+        "",
+        resp.choices[0].message.content.strip(),
+        flags=re.MULTILINE,
+    )
+    data = json.loads(raw)
+
+    fallback_subject = f"{role_title.strip() or 'Role'} | Du-Toit Griesel"
+    subject_line = str(data.get("subject_line", "")).strip() or fallback_subject
+    greeting = str(data.get("greeting", "")).strip() or (
+        f"Hi {recipient_name.strip()},"
+        if recipient_name.strip() else
+        "Hello,"
+    )
+    message_body = str(data.get("message_body", "")).strip()
+    closing_line = str(data.get("closing_line", "")).strip() or "Best, Du-Toit"
+
+    if not message_body:
+        raise ValueError("AI returned an empty InMail message.")
+
+    return {
+        "approach": str(data.get("approach", "")).strip() or "Tailored role-specific outreach",
+        "subject_line": subject_line,
+        "greeting": greeting,
+        "message_body": message_body,
+        "closing_line": closing_line,
+        "jd_keywords_used": [
+            str(k).strip()
+            for k in data.get("jd_keywords_used", [])
+            if str(k).strip()
+        ],
+    }
