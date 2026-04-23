@@ -988,39 +988,126 @@ def generate_config(
 
 
 # ---------------------------------------------------------------------------
-# Application question answering — single focused call, no strategy phase
+# Application question answering
+# Two-phase within a single JSON call: the model analyses the question type
+# and commits to a strategy BEFORE writing — producing structurally correct,
+# ATS-optimised, front-loaded answers tailored to the question category.
 # ---------------------------------------------------------------------------
 
 QUESTION_SYSTEM_PROMPT = """\
-You write application question answers on behalf of Du-Toit Griesel, a senior marketing
-and brand management professional currently based in Dubai.
+You write application question answers for Du-Toit Griesel, a senior agency professional
+based in Dubai targeting marketing, brand management, and client leadership roles in the GCC.
 
-RULES:
-- First-person throughout (I / me / my) — never refer to him by name or as he/him/his
-- 150–200 words — substantive enough to persuade, short enough to paste into a form field
-- Specific — ground every claim in a real role, real employer, real market, or real deliverable
-  from his background. No generic claims about "my experience" without naming the context.
-- Start with your strongest, most relevant point — no warm-up, no scene-setting sentence
-- Sound like a confident professional answering a direct question — not a cover letter
+You MUST analyse the question before writing. The JSON schema forces this — use the
+analysis fields to commit to the right strategy, then execute it in the answer field.
 
-BANNED OPENERS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — DETECT QUESTION TYPE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Classify into one of:
+  MOTIVATION   — "Why this role?", "Why this company?", "Why are you applying?"
+  COMPETENCY   — "Tell us about a time you X", "Describe a challenge", "Give an example"
+  VALUE-ADD    — "What can you bring?", "Why should we hire you?", "What would you contribute?"
+  EXPERIENCE   — "Describe your experience with X", "What is your background in X?"
+  BEHAVIORAL   — "How would you handle X?", "What would you do if X?"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2 — SELECT STRUCTURE & WORD COUNT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MOTIVATION → "3-Whys" | 160–190 words
+  1. Why this company: engage with something specific from the JD — the work, the market,
+     the challenge, the scale. Not "culture" or "values."
+  2. Why this role: what specifically about the responsibilities connects to your work?
+  3. Why you: one clear credential that makes you the right person for THIS role.
+
+COMPETENCY → STAR | 200–240 words
+  Situation  (1 sentence): the context, employer, brief scene-setting
+  Task       (1 sentence): your specific responsibility in that situation
+  Action     (60–70% of answer): what YOU personally did, step by step. Use "I", not "we."
+             Name the specific decisions, methods, tools, conversations you drove.
+  Result     (20–30%): the outcome. Quantify with scale, timeline, scope, or market impact
+             where possible. If no number, use "across X accounts", "within X weeks" etc.
+
+VALUE-ADD → Direct claim + evidence | 180–220 words
+  • Open with your single strongest applicable credential — direct, specific, named
+  • Support with 2 brief real examples (employer + what you did + outcome/scale)
+  • Close with one forward-looking sentence tied to a specific challenge in the JD
+
+EXPERIENCE → Depth + evidence | 170–210 words
+  • State the depth, recency, and context of the experience directly (don't warm up)
+  • Give 2 specific examples: employer, scope, what you owned, how it went
+  • Close by connecting to the JD requirement
+
+BEHAVIORAL → Method + real proof | 180–210 words
+  • Describe your approach method first (shows thinking, not just personality traits)
+  • Provide one concise real example proving you've done exactly this
+  • Keep forward-looking section brief (1 sentence max)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 3 — KEYWORD & CONTEXT STRATEGY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Identify the 2–3 most important phrases from the JD vocabulary
+- Embed them naturally across the answer (not clustered, not forced)
+- Name specific GCC / UAE markets, employers, or campaign contexts where relevant
+- Formal, professional tone throughout — GCC senior roles expect this
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 4 — FRONT-LOADING RULE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Recruiters F-scan answers. The first sentence receives the most attention.
+It must contain the single strongest, most specific proof point — not a scene-setter.
+✗ "I have been working in account management for 8 years." (weak opener — generic)
+✓ "Running integrated client accounts at Yellow in Dubai — where I currently manage
+   senior relationships with marketing directors across live UAE campaigns — is the
+   work I am most equipped to continue at a more senior level." (specific, positioned)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BANNED OPENERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✗ "I have always been passionate about…"
 ✗ "This role excites me because…"
 ✗ "I am thrilled / excited / delighted…"
-✗ "Throughout my career…"
+✗ "Throughout my career I have…"
 ✗ "Having spent [X] years…"
+✗ "I am writing to express…"
 
-BANNED PHRASES (anywhere in the answer):
-✗ "passion for" / "passionate about"
-✗ "I am eager to bring"
-✗ "proven track record"
-✗ "results-driven"
-✗ "I would be a great fit" / "perfect fit"
-✗ "resonates with me"
+BANNED PHRASES (anywhere):
+✗ "passion for" / "passionate about"  ✗ "proven track record"
+✗ "results-driven" / "dynamic"        ✗ "team player" / "hard worker"
+✗ "I would be a great fit"            ✗ "resonates with me"
+✗ "I am eager to bring"               ✗ "goes without saying"
 ✗ "I look forward to contributing"
-✗ "goes without saying"
 
-Return ONLY the answer text. No label, no "Answer:" prefix, no preamble. Just the answer, ready to paste."""
+REQUIRED in every answer:
+✓ At least one named employer, real market, or real deliverable
+✓ At least one scale / scope signal (even without a number)
+✓ At least one JD keyword phrase used naturally
+✓ First sentence contains the strongest specific credential
+
+Return ONLY valid JSON matching the schema. No markdown. No explanation."""
+
+
+QUESTION_USER_TEMPLATE = """\
+{context_line}JOB DESCRIPTION:
+{job_description}
+
+{candidate_context}
+
+APPLICATION QUESTION:
+{question}
+
+Analyse the question type, select the correct structure, identify 2–3 JD keywords to use,
+commit to the strongest opening statement — then write the answer.
+
+Return JSON:
+{{
+  "question_type": "MOTIVATION|COMPETENCY|VALUE-ADD|EXPERIENCE|BEHAVIORAL",
+  "structure": "3-whys|STAR|direct-evidence|depth-evidence|method-proof",
+  "word_target": "160-190 (or the correct range for this question type)",
+  "jd_keywords_used": ["exact phrase 1", "exact phrase 2"],
+  "lead_with": "One sentence — the single strongest, most specific opening statement",
+  "answer": "The full answer (correct word count for question type, first-person, ready to paste)"
+}}"""
 
 
 def answer_question(
@@ -1028,10 +1115,15 @@ def answer_question(
     question: str,
     company_name: str = "",
     role_title: str = "",
-) -> str:
+) -> dict:
     """
-    Generate a tailored answer to a single application screening question for Du-Toit.
-    Returns plain text ready to copy-paste into an application form.
+    Generate a tailored, structured answer to a single application question for Du-Toit.
+
+    Returns a dict with keys:
+      answer          — plain text ready to copy-paste
+      question_type   — detected category (MOTIVATION, COMPETENCY, VALUE-ADD, EXPERIENCE, BEHAVIORAL)
+      structure       — framework used (3-whys, STAR, etc.)
+      jd_keywords_used — JD phrases woven into the answer
     """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -1047,23 +1139,42 @@ def answer_question(
     elif company_name:
         context_line = f"Applying to: {company_name}\n\n"
 
-    user_message = (
-        f"{context_line}"
-        f"JOB DESCRIPTION:\n{job_description.strip()}\n\n"
-        f"{CANDIDATE_CONTEXT}\n\n"
-        f"APPLICATION QUESTION:\n{question.strip()}\n\n"
-        "Write a tailored answer (150–200 words). "
-        "Ground every sentence in real, specific experience. "
-        "Start with the single strongest, most relevant point."
+    user_message = QUESTION_USER_TEMPLATE.format(
+        context_line=context_line,
+        job_description=job_description.strip(),
+        candidate_context=CANDIDATE_CONTEXT,
+        question=question.strip(),
     )
 
     resp = client.chat.completions.create(
         model=_OPENAI_MODEL,
         temperature=0.4,
         timeout=_API_TIMEOUT,
+        response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": QUESTION_SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
         ],
     )
-    return resp.choices[0].message.content.strip()
+    raw = re.sub(
+        r"^```(?:json)?\s*|\s*```$",
+        "",
+        resp.choices[0].message.content.strip(),
+        flags=re.MULTILINE,
+    )
+    data = json.loads(raw)
+
+    answer = str(data.get("answer", "")).strip()
+    if not answer:
+        raise ValueError("AI returned an empty answer.")
+
+    return {
+        "answer": answer,
+        "question_type": str(data.get("question_type", "")).strip(),
+        "structure": str(data.get("structure", "")).strip(),
+        "jd_keywords_used": [
+            str(k).strip()
+            for k in data.get("jd_keywords_used", [])
+            if str(k).strip()
+        ],
+    }

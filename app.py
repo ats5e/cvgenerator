@@ -225,13 +225,18 @@ def answer_question():
         return jsonify({"error": "No question provided."}), 400
 
     try:
-        answer = ai_engine.answer_question(
+        result = ai_engine.answer_question(
             job_description=job_description,
             question=question,
             company_name=company_name,
             role_title=role_title,
         )
-        return jsonify({"answer": answer})
+        return jsonify({
+            "answer": result["answer"],
+            "question_type": result.get("question_type", ""),
+            "structure": result.get("structure", ""),
+            "keywords": result.get("jd_keywords_used", []),
+        })
     except Exception as error:  # noqa: BLE001
         import traceback
         print(traceback.format_exc())

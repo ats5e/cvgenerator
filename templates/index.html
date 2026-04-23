@@ -1324,6 +1324,30 @@
             padding-top: 16px;
         }
 
+        .answer-strategy {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+            margin-bottom: 12px;
+        }
+
+        .answer-strategy:empty {
+            display: none;
+        }
+
+        .chip-type {
+            background: rgba(232, 177, 123, 0.12);
+            border-color: rgba(232, 177, 123, 0.28);
+            color: var(--accent-strong);
+        }
+
+        .chip-kw {
+            background: rgba(146, 216, 171, 0.08);
+            border-color: rgba(146, 216, 171, 0.2);
+            color: var(--success);
+            font-size: 0.78rem;
+        }
+
         .answer-text {
             color: var(--text);
             font-size: 0.97rem;
@@ -2218,6 +2242,7 @@
                     <button class="btn btn-answer" type="button">Generate Answer</button>
                 </div>
                 <div class="answer-block" style="display:none">
+                    <div class="answer-strategy"></div>
                     <div class="answer-text"></div>
                     <div class="answer-footer">
                         <span class="answer-word-count"></span>
@@ -2293,6 +2318,36 @@
                 wordCount.textContent = `${countWords(data.answer)} words`;
                 copyBtn.textContent = "Copy Answer";
                 copyBtn.classList.remove("copied");
+
+                // Render strategy strip
+                const strategy = card.querySelector(".answer-strategy");
+                strategy.innerHTML = "";
+                if (data.question_type || (data.keywords && data.keywords.length)) {
+                    const parts = [];
+                    if (data.question_type) {
+                        const typeMap = {
+                            "MOTIVATION": "💡 Motivation",
+                            "COMPETENCY": "⭐ Competency (STAR)",
+                            "VALUE-ADD": "🎯 Value-add",
+                            "EXPERIENCE": "📋 Experience",
+                            "BEHAVIORAL": "🔄 Behavioural",
+                        };
+                        const label = typeMap[data.question_type] || data.question_type;
+                        const chip = document.createElement("span");
+                        chip.className = "chip chip-type";
+                        chip.textContent = label;
+                        strategy.appendChild(chip);
+                    }
+                    if (data.keywords && data.keywords.length) {
+                        data.keywords.forEach((kw) => {
+                            const chip = document.createElement("span");
+                            chip.className = "chip chip-kw";
+                            chip.textContent = kw;
+                            strategy.appendChild(chip);
+                        });
+                    }
+                }
+
                 answerBlock.style.display = "block";
 
             } catch (err) {
